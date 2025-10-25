@@ -24,6 +24,8 @@ pub mod sort;
 mod termdag;
 mod typechecking;
 pub mod util;
+#[cfg(test)]
+mod fact_ref_api_tests;
 
 // This is used to allow the `add_primitive` macro to work in
 // both this crate and other crates by referring to `::egglog`.
@@ -33,7 +35,7 @@ use ast::*;
 pub use cli::*;
 use constraint::{Constraint, Problem, SimpleTypeConstraint, TypeConstraint};
 use core::{AtomTerm, ResolvedAtomTerm, ResolvedCall};
-pub use core_relations::{BaseValue, ContainerValue, ExecutionState, Value};
+pub use core_relations::{BaseValue, ContainerValue, ExecutionState, FactRef, Value};
 use core_relations::{ExternalFunctionId, make_external_func};
 use csv::Writer;
 pub use egglog_add_primitive::add_primitive;

@@ -1625,6 +1625,88 @@ impl TableAction {
         );
         state.stage_insert(self.table, &self.scratch);
     }
+
+    // Fact ID support methods for first-class facts and modal logic
+
+    /// Create a FactRef value for a tuple in this table.
+    ///
+    /// This looks up an existing fact by key and returns a FactRef if found.
+    /// Returns `None` if the key is not present in the table.
+    pub fn create_fact_ref(&self, state: &ExecutionState, key: &[Value]) -> Option<FactRef> {
+        let table = state.get_table(self.table);
+        if let Some(row) = table.get_row(key) {
+            if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
+                return Some(FactRef { 
+                    table_id: self.table, 
+                    fact_id 
+                });
+            }
+        }
+        None
+    }
+
+    /// Resolve a FactRef to its current row data.
+    ///
+    /// Returns the row data if the fact reference is valid and the fact still exists.
+    /// Returns `None` if the fact reference is invalid or the fact has been removed.
+    pub fn resolve_fact_ref(&self, state: &ExecutionState, fact_ref: &FactRef) -> Option<Vec<Value>> {
+        if fact_ref.table_id != self.table {
+            // This FactRef is for a different table
+            return None;
+        }
+
+        let table = state.get_table(self.table);
+        if let Some(row_id) = table.get_row_by_fact_id(fact_ref.fact_id) {
+            if let Some(row) = table.get_row_by_id(row_id) {
+                return Some(row.vals.to_vec());
+            }
+        }
+        None
+    }
+
+    /// Check if a fact is asserted (vs just referenced).
+    ///
+    /// Returns `None` if the fact reference is invalid or for a different table.
+    /// Returns `Some(true)` if the fact is asserted as true.
+    /// Returns `Some(false)` if the fact exists but is not asserted (referenced only).
+    pub fn is_fact_asserted(&self, state: &ExecutionState, fact_ref: &FactRef) -> Option<bool> {
+        if fact_ref.table_id != self.table {
+            return None;
+        }
+
+        let table = state.get_table(self.table);
+        table.is_fact_asserted(fact_ref.fact_id)
+    }
+
+    /// Assert a fact (mark as true) if fact tracking is enabled.
+    ///
+    /// For now, this is a placeholder that returns false.
+    /// Full implementation would require extending the mutation staging system
+    /// to handle truth status changes separately from row insertion/deletion.
+    pub fn assert_fact(&self, _state: &mut ExecutionState, fact_ref: &FactRef) -> bool {
+        if fact_ref.table_id != self.table {
+            return false;
+        }
+
+        // TODO: Implement truth status mutation staging
+        // This would require a new type of staged operation for truth changes
+        false
+    }
+
+    /// Retract a fact (mark as not asserted) if fact tracking is enabled.
+    ///
+    /// For now, this is a placeholder that returns false.
+    /// Full implementation would require extending the mutation staging system
+    /// to handle truth status changes separately from row insertion/deletion.
+    pub fn retract_fact(&self, _state: &mut ExecutionState, fact_ref: &FactRef) -> bool {
+        if fact_ref.table_id != self.table {
+            return false;
+        }
+
+        // TODO: Implement truth status mutation staging 
+        // This would require a new type of staged operation for truth changes
+        false
+    }
 }
 
 /// A variant of `TableAction` for the union-find.

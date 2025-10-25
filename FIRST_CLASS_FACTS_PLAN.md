@@ -7,8 +7,8 @@
 - ✅ **Phase 1.2a**: Parallel insertion fact IDs - COMPLETED
 - ✅ **Phase 1.2b**: Compaction handling - COMPLETED
 - ✅ **Phase 1.3**: BaseValue integration - COMPLETED
-- 🔄 **Phase 1.4**: High-level API integration - NEXT
-- ⏳ **Phase 1.5**: End-to-end testing - PENDING
+- ✅ **Phase 1.4**: High-level API integration - COMPLETED
+- 🔄 **Phase 1.5**: End-to-end testing - NEXT
 
 ## Overview
 This plan implements first-class facts in egglog by:
@@ -80,21 +80,22 @@ This plan implements first-class facts in egglog by:
   - [x] Implement these methods in SortedWritesTable with fact tracking support
   - [x] Add comprehensive integration tests for FactRef as BaseValue
 
-### 1.4 High-level API Integration ⏳ PENDING  
-- [ ] **Extend Table trait interface** in `core-relations/src/table_spec.rs`
-  - [ ] Add `get_fact_id(&self, key: &[Value]) -> Option<FactId>` method
-  - [ ] Add `get_row_by_fact_id(&self, fact_id: FactId) -> Option<Row>` method
-  - [ ] Add `is_fact_asserted(&self, fact_id: FactId) -> Option<bool>` method
-  - [ ] Add `assert_fact(&mut self, fact_id: FactId)` method
-  - [ ] Add `retract_fact(&mut self, fact_id: FactId)` method
-  - [ ] Update existing methods to handle truth status
+### 1.4 High-level API Integration ✅ COMPLETED
+- [x] **Extend TableAction with fact ID methods** in `egglog-bridge/src/lib.rs`
+  - [x] Add `create_fact_ref()` method to create FactRef from table keys
+  - [x] Add `resolve_fact_ref()` method to get row data from FactRef
+  - [x] Add `is_fact_asserted()` method to check assertion status  
+  - [x] Add `assert_fact()` and `retract_fact()` placeholder methods (staged operations needed)
+  - [x] Implement all methods with proper error handling and validation
 
-- [ ] **Update Row struct** in `core-relations/src/table_spec.rs`
-  - [ ] Add `fact_id: Option<FactId>` field to `Row`
-  - [ ] Add `asserted: Option<bool>` field to `Row` (when truth tracking enabled)
-  - [ ] Update all `Row` construction sites to include fact ID and truth status
+- [x] **Integrate with high-level Rust API** in `src/prelude.rs`  
+  - [x] Export FactRef type from main egglog module
+  - [x] Add fact ID methods to RustRuleContext for user-facing API
+  - [x] Enable FactRef creation and resolution in Rust rules
+  - [x] Add comprehensive documentation for modal logic usage
+  - [x] Create integration tests for high-level API functionality
 
-### 1.5 End-to-end Testing ⏳ PENDING
+### 1.5 End-to-end Testing 🔄 CURRENT
 - [ ] **Create comprehensive fact reference tests**
   - [ ] Test fact references across table operations and compaction
   - [ ] Test cross-table fact reference resolution

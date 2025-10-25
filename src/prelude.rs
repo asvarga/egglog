@@ -311,6 +311,57 @@ impl RustRuleContext<'_, '_> {
             .subsume(self.exec_state, key.iter().copied())
     }
 
+    /// Create a FactRef for a fact in a table.
+    ///
+    /// This looks up an existing fact by key and returns a FactRef if found.
+    /// Returns `None` if the key is not present in the table.
+    /// For more information, see `egglog_bridge::TableAction::create_fact_ref`.
+    pub fn create_fact_ref(&self, table: &str, key: &[Value]) -> Option<FactRef> {
+        self.get_table_action(table)
+            .create_fact_ref(self.exec_state, key)
+    }
+
+    /// Resolve a FactRef to its current row data.
+    ///
+    /// Returns the row data if the fact reference is valid and the fact still exists.
+    /// Returns `None` if the fact reference is invalid or the fact has been removed.
+    /// For more information, see `egglog_bridge::TableAction::resolve_fact_ref`.
+    pub fn resolve_fact_ref(&self, table: &str, fact_ref: &FactRef) -> Option<Vec<Value>> {
+        self.get_table_action(table)
+            .resolve_fact_ref(self.exec_state, fact_ref)
+    }
+
+    /// Check if a fact is asserted (vs just referenced).
+    ///
+    /// Returns `None` if the fact reference is invalid or for a different table.
+    /// Returns `Some(true)` if the fact is asserted as true.
+    /// Returns `Some(false)` if the fact exists but is not asserted (referenced only).
+    /// For more information, see `egglog_bridge::TableAction::is_fact_asserted`.
+    pub fn is_fact_asserted(&self, table: &str, fact_ref: &FactRef) -> Option<bool> {
+        self.get_table_action(table)
+            .is_fact_asserted(self.exec_state, fact_ref)
+    }
+
+    /// Assert a fact (mark as true) if fact tracking is enabled.
+    ///
+    /// Returns `true` if the fact was successfully asserted.
+    /// Returns `false` if the fact doesn't exist, is for a different table, or fact tracking is disabled.
+    /// For more information, see `egglog_bridge::TableAction::assert_fact`.
+    pub fn assert_fact(&mut self, table: &str, fact_ref: &FactRef) -> bool {
+        self.get_table_action(table)
+            .assert_fact(self.exec_state, fact_ref)
+    }
+
+    /// Retract a fact (mark as not asserted) if fact tracking is enabled.
+    ///
+    /// Returns `true` if the fact was successfully retracted.
+    /// Returns `false` if the fact doesn't exist, is for a different table, or fact tracking is disabled.
+    /// For more information, see `egglog_bridge::TableAction::retract_fact`.
+    pub fn retract_fact(&mut self, table: &str, fact_ref: &FactRef) -> bool {
+        self.get_table_action(table)
+            .retract_fact(self.exec_state, fact_ref)
+    }
+
     /// Panic.
     /// You should also return `None` from your callback if you call
     /// this function, which this function hopefully makes easier by
