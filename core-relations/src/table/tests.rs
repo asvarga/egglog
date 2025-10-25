@@ -230,3 +230,44 @@ fn test_fact_id_assignment_serial() {
         assert_eq!(table.get_row_by_fact_id(fid2), Some(row2.id));
     }
 }
+
+#[test] 
+fn test_fact_id_assignment_multiple_insertions() {
+    use crate::table::SortedWritesTable;
+
+    empty_execution_state!(e);
+
+    // Create empty table from scratch
+    let mut table = SortedWritesTable::new(
+        1,      // 1 key column
+        2,      // 2 total columns
+        None,   // No sorting
+        vec![], // No rebuild columns
+        Box::new(|_, _, new, out| {
+            out.clone_from_slice(new);
+            true
+        }), // Simple merge function
+    );
+
+    // Enable truth tracking for this test
+    table.enable_truth_tracking();
+
+    // Insert multiple rows that may trigger parallel processing
+    for i in 1..=10 {
+        table.new_buffer().stage_insert(&[v(i), v(i * 10)]);
+        table.merge(&mut e);
+        
+        let row = table.get_row(&[v(i)]).expect(&format!("row {} should exist", i));
+        let fact_id = table.get_fact_id(row.id);
+        assert!(fact_id.is_some(), "Fact ID should be assigned to row {}", i);
+    }
+    
+    // Verify all rows have unique fact IDs
+    let mut fact_ids = Vec::new();
+    for i in 1..=10 {
+        let row = table.get_row(&[v(i)]).unwrap();
+        let fact_id = table.get_fact_id(row.id).unwrap();
+        assert!(!fact_ids.contains(&fact_id), "Fact ID {:?} should be unique", fact_id);
+        fact_ids.push(fact_id);
+    }
+}

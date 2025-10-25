@@ -955,6 +955,21 @@ impl SortedWritesTable {
             })
             .collect_vec_list();
         self.data.data = row_writer.finish();
+        
+        // Assign fact IDs to all new rows created during parallel insertion
+        if self.truth_enabled {
+            let current_row_count = self.data.next_row();
+            for row_id in next_offset.index()..current_row_count.index() {
+                let row_id = RowId::from_usize(row_id);
+                if !self.fact_id_map.contains_key(&row_id) {
+                    let fact_id = self.next_fact_id;
+                    self.next_fact_id = self.next_fact_id.inc();
+                    self.fact_id_map.insert(row_id, fact_id);
+                    self.fact_lookup.insert(fact_id, row_id);
+                }
+            }
+        }
+        
         // Now we just need to reset our invariants.
 
         // Confirm none of the writes violated sort order and update the
