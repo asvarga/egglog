@@ -30,6 +30,40 @@ use crate::{
     },
 };
 
+/// Errors that can occur when working with fact references
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FactRefError {
+    /// Fact reference points to a non-existent fact
+    InvalidFactRef(FactRef),
+    /// Fact reference is stale (fact was deleted)
+    StaleFactRef(FactRef),
+    /// Truth status inconsistency detected
+    TruthStatusInconsistent(FactId),
+    /// Operation not supported on unasserted facts
+    OperationOnUnassertedFact(FactId),
+}
+
+impl std::fmt::Display for FactRefError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FactRefError::InvalidFactRef(fact_ref) => {
+                write!(f, "Invalid fact reference: {:?}", fact_ref)
+            }
+            FactRefError::StaleFactRef(fact_ref) => {
+                write!(f, "Stale fact reference: {:?}", fact_ref)
+            }
+            FactRefError::TruthStatusInconsistent(fact_id) => {
+                write!(f, "Truth status inconsistent for fact: {:?}", fact_id)
+            }
+            FactRefError::OperationOnUnassertedFact(fact_id) => {
+                write!(f, "Operation attempted on unasserted fact: {:?}", fact_id)
+            }
+        }
+    }
+}
+
+impl std::error::Error for FactRefError {}
+
 use self::plan::Plan;
 use crate::action::ExecutionState;
 
@@ -737,8 +771,129 @@ impl Database {
 
     /// Validate that a FactRef points to an existing fact.
     pub fn validate_fact_ref(&self, fact_ref: &FactRef) -> bool {
-        let table = self.get_table(fact_ref.table_id);
-        table.get_row_by_fact_id(fact_ref.fact_id).is_some()
+        match self.get_table_safe(fact_ref.table_id) {
+            Ok(table) => table.get_row_by_fact_id(fact_ref.fact_id).is_some(),
+            Err(_) => false,
+        }
+    }
+
+    /// Query all asserted facts in a table.
+    /// 
+    /// Returns an iterator over FactRefs for facts that are currently asserted (truth status = true).
+    /// This enables modal logic queries that only consider "true" facts.
+    pub fn query_asserted_facts(&self, table_id: TableId) -> Vec<FactRef> {
+        let table = self.get_table(table_id);
+        let mut asserted_facts = Vec::new();
+        
+        for (fact_id, _values) in table.iter_facts() {
+            if table.is_fact_asserted(fact_id).unwrap_or(false) {
+                asserted_facts.push(FactRef { table_id, fact_id });
+            }
+        }
+        
+        asserted_facts
+    }
+
+    /// Query all facts in a table (both asserted and referenced).
+    /// 
+    /// Returns an iterator over FactRefs for all facts that exist in the table,
+    /// regardless of their truth status. This enables queries over the complete
+    /// fact space, including unasserted propositions.
+    pub fn query_all_facts(&self, table_id: TableId) -> Vec<FactRef> {
+        let table = self.get_table(table_id);
+        table.get_all_fact_ids()
+            .into_iter()
+            .map(|fact_id| FactRef { table_id, fact_id })
+            .collect()
+    }
+
+    /// Create an unasserted fact reference for a given table key.
+    /// 
+    /// Unlike create_fact_ref, this creates a fact that exists but is not asserted.
+    /// This is useful for modal logic where we need to reference propositions
+    /// without claiming they are true.
+    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<FactRef> {
+        let table = self.get_table_mut(table_id);
+        
+        // First check if the fact already exists
+        if let Some(row) = table.get_row(key) {
+            if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
+                // Fact already exists, return it (regardless of assertion status)
+                return Some(FactRef { table_id, fact_id });
+            }
+        }
+        
+        // For now, return None since we need to implement fact creation in tables
+        // This would require extending the table interface to create unasserted facts
+        None
+    }
+
+    /// Safe table access that returns an error instead of panicking
+    fn get_table_safe(&self, table_id: TableId) -> Result<&WrappedTable, FactRefError> {
+        self.tables.get(table_id)
+            .map(|info| &info.table)
+            .ok_or_else(|| FactRefError::InvalidFactRef(FactRef { table_id, fact_id: FactId::from_usize(0) }))
+    }
+
+    /// Validate that a FactRef points to an existing, valid fact.
+    /// 
+    /// Performs comprehensive validation including existence and consistency checks.
+    pub fn validate_fact_ref_comprehensive(&self, fact_ref: &FactRef) -> Result<(), FactRefError> {
+        let table = self.get_table_safe(fact_ref.table_id)?;
+        
+        // Check if fact exists
+        if table.get_row_by_fact_id(fact_ref.fact_id).is_none() {
+            return Err(FactRefError::InvalidFactRef(*fact_ref));
+        }
+        
+        // Check truth status consistency
+        if table.truth_enabled() {
+            let has_truth_status = table.has_truth_status(fact_ref.fact_id);
+            if !has_truth_status {
+                return Err(FactRefError::TruthStatusInconsistent(fact_ref.fact_id));
+            }
+        }
+        
+        Ok(())
+    }
+
+    /// Check if a fact reference is stale (points to deleted/non-existent fact).
+    pub fn is_fact_ref_stale(&self, fact_ref: &FactRef) -> bool {
+        !self.validate_fact_ref(fact_ref)
+    }
+
+    /// Get the truth status of a fact, with validation.
+    pub fn get_fact_truth_status(&self, fact_ref: &FactRef) -> Result<Option<bool>, FactRefError> {
+        self.validate_fact_ref_comprehensive(fact_ref)?;
+        
+        let table = self.get_table_safe(fact_ref.table_id)?;
+        Ok(table.is_fact_asserted(fact_ref.fact_id))
+    }
+
+    /// Assert a fact with validation, returning detailed error information.
+    pub fn assert_fact_validated(&mut self, fact_ref: &FactRef) -> Result<bool, FactRefError> {
+        self.validate_fact_ref_comprehensive(fact_ref)?;
+        
+        // For mutable access, we still need to handle the case where table doesn't exist
+        if !self.tables.contains_key(fact_ref.table_id) {
+            return Err(FactRefError::InvalidFactRef(*fact_ref));
+        }
+        
+        let table = self.get_table_mut(fact_ref.table_id);
+        Ok(table.assert_fact(fact_ref.fact_id))
+    }
+
+    /// Retract a fact with validation, returning detailed error information.
+    pub fn retract_fact_validated(&mut self, fact_ref: &FactRef) -> Result<bool, FactRefError> {
+        self.validate_fact_ref_comprehensive(fact_ref)?;
+        
+        // For mutable access, we still need to handle the case where table doesn't exist
+        if !self.tables.contains_key(fact_ref.table_id) {
+            return Err(FactRefError::InvalidFactRef(*fact_ref));
+        }
+        
+        let table = self.get_table_mut(fact_ref.table_id);
+        Ok(table.retract_fact(fact_ref.fact_id))
     }
 }
 

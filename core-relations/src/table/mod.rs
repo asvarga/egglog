@@ -154,6 +154,7 @@ pub struct SortedWritesTable {
     next_fact_id: FactId,
     fact_id_map: HashMap<RowId, FactId>,
     fact_lookup: HashMap<FactId, RowId>,
+    fact_truth_status: HashMap<FactId, bool>, // true = asserted, false = referenced only
     truth_enabled: bool,
 }
 
@@ -175,6 +176,7 @@ impl Clone for SortedWritesTable {
             next_fact_id: self.next_fact_id,
             fact_id_map: self.fact_id_map.clone(),
             fact_lookup: self.fact_lookup.clone(),
+            fact_truth_status: self.fact_truth_status.clone(),
             truth_enabled: self.truth_enabled,
         }
     }
@@ -553,26 +555,76 @@ impl Table for SortedWritesTable {
             return None;
         }
 
-        // If we can find the row, the fact exists
+        // Check if the fact exists first
         if self.fact_lookup.contains_key(&fact_id) {
-            // For now, all facts that exist are considered asserted
-            // This could be extended with a separate truth status column
-            Some(true)
+            // Get the actual truth status (defaults to true if not explicitly set)
+            Some(
+                self.fact_truth_status
+                    .get(&fact_id)
+                    .copied()
+                    .unwrap_or(true),
+            )
         } else {
             None
         }
     }
 
-    fn assert_fact(&mut self, _fact_id: FactId) -> bool {
-        // For now, we don't support changing assertion status
-        // This would require tracking truth status separately from existence
-        false
+    fn assert_fact(&mut self, fact_id: FactId) -> bool {
+        if !self.truth_enabled {
+            return false;
+        }
+
+        // Check if the fact exists
+        if self.fact_lookup.contains_key(&fact_id) {
+            // Mark it as asserted
+            self.fact_truth_status.insert(fact_id, true);
+            true
+        } else {
+            false
+        }
     }
 
-    fn retract_fact(&mut self, _fact_id: FactId) -> bool {
-        // For now, we don't support changing assertion status
-        // This would require tracking truth status separately from existence
-        false
+    fn retract_fact(&mut self, fact_id: FactId) -> bool {
+        if !self.truth_enabled {
+            return false;
+        }
+
+        // Check if the fact exists
+        if self.fact_lookup.contains_key(&fact_id) {
+            // Mark it as not asserted (referenced only)
+            self.fact_truth_status.insert(fact_id, false);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn iter_facts(&self) -> Box<dyn Iterator<Item = (FactId, Vec<Value>)> + '_> {
+        if self.truth_enabled {
+            Box::new(self.fact_lookup.iter().filter_map(|(fact_id, row_id)| {
+                self.data
+                    .get_row(*row_id)
+                    .map(|values| (*fact_id, values.to_vec()))
+            }))
+        } else {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    fn get_all_fact_ids(&self) -> Vec<FactId> {
+        if self.truth_enabled {
+            self.fact_lookup.keys().copied().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn truth_enabled(&self) -> bool {
+        self.truth_enabled
+    }
+
+    fn has_truth_status(&self, fact_id: FactId) -> bool {
+        self.truth_enabled && self.fact_truth_status.contains_key(&fact_id)
     }
 }
 
@@ -614,6 +666,7 @@ impl SortedWritesTable {
             next_fact_id: FactId::new(0),
             fact_id_map: HashMap::default(),
             fact_lookup: HashMap::default(),
+            fact_truth_status: HashMap::default(),
             truth_enabled: false,
         }
     }
@@ -793,6 +846,8 @@ impl SortedWritesTable {
                                     self.next_fact_id = self.next_fact_id.inc();
                                     self.fact_id_map.insert(new, fact_id);
                                     self.fact_lookup.insert(fact_id, new);
+                                    // New facts default to asserted
+                                    self.fact_truth_status.insert(fact_id, true);
                                 }
                                 if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                     assert!(
@@ -820,6 +875,8 @@ impl SortedWritesTable {
                                 self.next_fact_id = self.next_fact_id.inc();
                                 self.fact_id_map.insert(new, fact_id);
                                 self.fact_lookup.insert(fact_id, new);
+                                // New facts default to asserted
+                                self.fact_truth_status.insert(fact_id, true);
                             }
                             if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                 assert!(
@@ -884,6 +941,8 @@ impl SortedWritesTable {
                                 self.next_fact_id = self.next_fact_id.inc();
                                 self.fact_id_map.insert(new, fact_id);
                                 self.fact_lookup.insert(fact_id, new);
+                                // New facts default to asserted
+                                self.fact_truth_status.insert(fact_id, true);
                             }
                             let (shard, hc) = hash_code(self.hash.shard_data(), query, self.n_keys);
                             debug_assert_eq!(shard, _outer_shard);
@@ -1137,6 +1196,8 @@ impl SortedWritesTable {
 
         self.fact_id_map.insert(row, fact_id);
         self.fact_lookup.insert(fact_id, row);
+        // New facts default to asserted
+        self.fact_truth_status.insert(fact_id, true);
 
         fact_id
     }

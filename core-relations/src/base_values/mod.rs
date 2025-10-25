@@ -51,7 +51,7 @@ impl BaseValue for num::Rational64 {}
 /// This enables first-class facts and modal logic by allowing references to tuples
 /// that may or may not be asserted as true. The fact reference is stable across
 /// table operations (unlike RowId which can change during compaction).
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FactRef {
     /// The table containing this fact
     pub table_id: TableId,

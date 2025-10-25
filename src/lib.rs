@@ -1414,6 +1414,41 @@ impl EGraph {
         })
     }
 
+    /// Validate that a FactRef Value points to an existing, valid fact.
+    ///
+    /// Performs comprehensive validation including existence and consistency checks.
+    pub fn validate_fact_ref(&self, fact_ref_val: Value) -> Result<(), Error> {
+        self.backend
+            .validate_fact_ref(fact_ref_val)
+            .map_err(|e| Error::BackendError(e.to_string()))
+    }
+
+    /// Check if a fact reference is stale (points to deleted/non-existent fact).
+    pub fn is_fact_ref_stale(&self, fact_ref_val: Value) -> bool {
+        self.backend.is_fact_ref_stale(fact_ref_val)
+    }
+
+    /// Get the truth status of a fact, with validation.
+    pub fn get_fact_truth_status(&self, fact_ref_val: Value) -> Result<Option<bool>, Error> {
+        self.backend
+            .get_fact_truth_status(fact_ref_val)
+            .map_err(|e| Error::BackendError(e.to_string()))
+    }
+
+    /// Assert a fact with validation, returning detailed error information.
+    pub fn assert_fact_validated(&mut self, fact_ref_val: Value) -> Result<bool, Error> {
+        self.backend
+            .assert_fact_validated(fact_ref_val)
+            .map_err(|e| Error::BackendError(e.to_string()))
+    }
+
+    /// Retract a fact with validation, returning detailed error information.
+    pub fn retract_fact_validated(&mut self, fact_ref_val: Value) -> Result<bool, Error> {
+        self.backend
+            .retract_fact_validated(fact_ref_val)
+            .map_err(|e| Error::BackendError(e.to_string()))
+    }
+
     /// Get the size of a function in the e-graph.
     ///
     /// `panics` if the function does not exist.

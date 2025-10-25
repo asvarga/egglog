@@ -371,6 +371,75 @@ impl EGraph {
         self.db.retract_fact(&fact_ref)
     }
 
+    /// Query all asserted facts in a table.
+    ///
+    /// Returns a vector of FactRef Values for facts that are currently asserted (truth status = true).
+    /// This enables modal logic queries that only consider "true" facts.
+    pub fn query_asserted_facts(&self, table_id: TableId) -> Vec<Value> {
+        self.db.query_asserted_facts(table_id)
+            .into_iter()
+            .map(|fact_ref| self.base_values().get(fact_ref))
+            .collect()
+    }
+
+    /// Query all facts in a table (both asserted and referenced).
+    ///
+    /// Returns a vector of FactRef Values for all facts that exist in the table,
+    /// regardless of their truth status. This enables queries over the complete
+    /// fact space, including unasserted propositions.
+    pub fn query_all_facts(&self, table_id: TableId) -> Vec<Value> {
+        self.db.query_all_facts(table_id)
+            .into_iter()
+            .map(|fact_ref| self.base_values().get(fact_ref))
+            .collect()
+    }
+
+    /// Create an unasserted fact reference for a given table key.
+    ///
+    /// Unlike create_fact_ref, this creates a fact that exists but is not asserted.
+    /// This is useful for modal logic where we need to reference propositions
+    /// without claiming they are true.
+    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<Value> {
+        self.db.create_unasserted_fact_ref(table_id, key)
+            .map(|fact_ref| self.base_values().get(fact_ref))
+    }
+
+    /// Validate that a FactRef Value points to an existing, valid fact.
+    ///
+    /// Performs comprehensive validation including existence and consistency checks.
+    pub fn validate_fact_ref(&self, fact_ref_val: Value) -> Result<()> {
+        let fact_ref: FactRef = self.base_values().unwrap(fact_ref_val);
+        self.db.validate_fact_ref_comprehensive(&fact_ref)
+            .map_err(anyhow::Error::new)
+    }
+
+    /// Check if a fact reference is stale (points to deleted/non-existent fact).
+    pub fn is_fact_ref_stale(&self, fact_ref_val: Value) -> bool {
+        let fact_ref: FactRef = self.base_values().unwrap(fact_ref_val);
+        self.db.is_fact_ref_stale(&fact_ref)
+    }
+
+    /// Get the truth status of a fact, with validation.
+    pub fn get_fact_truth_status(&self, fact_ref_val: Value) -> Result<Option<bool>> {
+        let fact_ref: FactRef = self.base_values().unwrap(fact_ref_val);
+        self.db.get_fact_truth_status(&fact_ref)
+            .map_err(anyhow::Error::new)
+    }
+
+    /// Assert a fact with validation, returning detailed error information.
+    pub fn assert_fact_validated(&mut self, fact_ref_val: Value) -> Result<bool> {
+        let fact_ref: FactRef = self.base_values().unwrap(fact_ref_val);
+        self.db.assert_fact_validated(&fact_ref)
+            .map_err(anyhow::Error::new)
+    }
+
+    /// Retract a fact with validation, returning detailed error information.
+    pub fn retract_fact_validated(&mut self, fact_ref_val: Value) -> Result<bool> {
+        let fact_ref: FactRef = self.base_values().unwrap(fact_ref_val);
+        self.db.retract_fact_validated(&fact_ref)
+            .map_err(anyhow::Error::new)
+    }
+
     /// Look up the canonical value for `val` in the union-find.
     ///
     /// If the value has never been inserted into the union-find, `val` is returned.

@@ -363,6 +363,26 @@ pub trait Table: Any + Send + Sync {
     fn retract_fact(&mut self, _fact_id: FactId) -> bool {
         false // Default implementation: no fact tracking
     }
+
+    /// Iterate over all facts in the table
+    fn iter_facts(&self) -> Box<dyn Iterator<Item = (FactId, Vec<Value>)> + '_> {
+        Box::new(std::iter::empty()) // Default implementation: no facts
+    }
+
+    /// Get all fact IDs in the table
+    fn get_all_fact_ids(&self) -> Vec<FactId> {
+        Vec::new() // Default implementation: no facts
+    }
+
+    /// Check if the table has truth status tracking enabled
+    fn truth_enabled(&self) -> bool {
+        false // Default implementation: no truth tracking
+    }
+
+    /// Check if a fact has truth status information
+    fn has_truth_status(&self, _fact_id: FactId) -> bool {
+        false // Default implementation: no truth status
+    }
 }
 
 /// A trait specifying a buffer of pending mutations for a [`Table`].
