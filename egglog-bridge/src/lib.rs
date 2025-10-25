@@ -1754,16 +1754,25 @@ fn combine_subsumed(v1: Value, v2: Value) -> Value {
     std::cmp::max(v1, v2)
 }
 
+// Truth status constants for first-class facts
+pub(crate) const ASSERTED: Value = Value::new_const(1);
+pub(crate) const REFERENCED: Value = Value::new_const(0);
+fn combine_truth_status(v1: Value, v2: Value) -> Value {
+    // If either fact is asserted, the result is asserted
+    std::cmp::max(v1, v2)
+}
+
 /// A struct helping with some calculations of where some information is stored at the
 /// core-relations Table level for a given function.
 ///
 /// Functions can have multiple "output columns" in the underlying core-relations layer depending
 /// on whether different features are enabled. Roughly, tables are laid out as:
 ///
-/// > `[key0, ..., keyn, return value, timestamp, proof_id?, subsume?]`
+/// > `[key0, ..., keyn, return value, timestamp, proof_id?, subsume?, truth?]`
 ///
 /// Where there are `n+1` key columns and columns marked with a question mark are optional,
-/// depending on the egraph and table-level configuration.
+/// depending on the egraph and table-level configuration. The `truth?` column is for first-class
+/// facts support, distinguishing asserted facts from merely referenced facts.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct SchemaMath {
     /// Whether or not proofs are enabled.
@@ -1861,6 +1870,32 @@ impl SchemaMath {
         } else {
             self.func_cols + 1
         }
+    }
+
+    /// Get the column index for truth status (asserted vs referenced facts).
+    /// Note: This is currently unused but provides the foundation for truth tracking.
+    #[allow(dead_code)]
+    #[track_caller]
+    fn truth_col(&self, truth_enabled: bool) -> usize {
+        assert!(truth_enabled, "truth tracking must be enabled to use truth_col()");
+        let mut offset = self.func_cols + 1; // timestamp
+        if self.tracing {
+            offset += 1; // proof_id
+        }
+        if self.subsume {
+            offset += 1; // subsume
+        }
+        offset
+    }
+
+    /// Calculate total columns including optional truth column.
+    /// Note: This is currently unused but provides the foundation for truth tracking.
+    #[allow(dead_code)]
+    fn table_columns_with_truth(&self, truth_enabled: bool) -> usize {
+        self.func_cols + 1 /* timestamp */ 
+            + if self.tracing { 1 } else { 0 }
+            + if self.subsume { 1 } else { 0 }
+            + if truth_enabled { 1 } else { 0 }
     }
 }
 

@@ -2,8 +2,8 @@
 
 ## Progress Status
 - ✅ **Phase 1.1**: Core fact types (`FactId`, `FactRef`) - COMPLETED
-- 🔄 **Phase 1.1a**: Truth status system - NEXT
-- ⏳ **Phase 1.2**: Table infrastructure changes - PENDING
+- ✅ **Phase 1.1a**: Truth status system foundation - COMPLETED
+- 🔄 **Phase 1.2**: Table infrastructure changes - NEXT
 - ⏳ **Phase 2**: Integration with value system - PENDING
 - ⏳ **Phase 3**: Table implementation details - PENDING
 - ⏳ **Phase 4**: Syntactic sugar and modal logic - PENDING
@@ -37,12 +37,13 @@ This plan implements first-class facts in egglog by:
   - [x] Test interning, retrieval, and deduplication behavior
   - [x] Verify edge cases with zero and large ID values
 
-### 1.1a Truth Status System
-- [ ] **Add Truth Status Column Support**
-  - [ ] Extend `SchemaMath` in `egglog-bridge/src/lib.rs` to support truth status column
-  - [ ] Add `asserted: bool` field to control whether table tracks truth status
-  - [ ] Add `truth_col()` method to `SchemaMath` similar to `subsume_col()` and `proof_id_col()`
-  - [ ] Update `table_columns()` to include truth column when enabled
+### 1.1a Truth Status System ✅ COMPLETED
+- [x] **Add Truth Status Column Support**
+  - [x] Extend `SchemaMath` in `egglog-bridge/src/lib.rs` to support truth status column
+  - [x] Add `truth_col()` method to `SchemaMath` similar to `subsume_col()` and `proof_id_col()`
+  - [x] Add `table_columns_with_truth()` method to include truth column when enabled
+  - [x] Add truth status constants (`ASSERTED`, `REFERENCED`) and combine function
+  - [x] Update table layout documentation to include `truth?` column
 
 ### 1.2 Table Infrastructure Changes
 - [ ] **Extend `SortedWritesTable`** in `core-relations/src/table/mod.rs`
