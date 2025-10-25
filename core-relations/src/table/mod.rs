@@ -25,7 +25,7 @@ use sharded_hash_table::ShardedHashTable;
 use crate::{
     Pooled, TableChange, TableId,
     action::ExecutionState,
-    common::{HashMap, ShardData, ShardId, SubsetTracker, Value},
+    common::{FactId, HashMap, ShardData, ShardId, SubsetTracker, Value},
     hash_index::{ColumnIndex, Index},
     offsets::{OffsetRange, Offsets, RowId, Subset, SubsetRef},
     parallel_heuristics::parallelize_table_op,
@@ -149,6 +149,12 @@ pub struct SortedWritesTable {
     rebuild_index: Index<ColumnIndex>,
     // Used to manage incremental rebuilds.
     subset_tracker: SubsetTracker,
+
+    // First-class facts support
+    next_fact_id: FactId,
+    fact_id_map: HashMap<RowId, FactId>,
+    fact_lookup: HashMap<FactId, RowId>,
+    truth_enabled: bool,
 }
 
 impl Clone for SortedWritesTable {
@@ -166,6 +172,10 @@ impl Clone for SortedWritesTable {
             to_rebuild: self.to_rebuild.clone(),
             rebuild_index: Index::new(self.to_rebuild.clone(), ColumnIndex::new()),
             subset_tracker: Default::default(),
+            next_fact_id: self.next_fact_id,
+            fact_id_map: self.fact_id_map.clone(),
+            fact_lookup: self.fact_lookup.clone(),
+            truth_enabled: self.truth_enabled,
         }
     }
 }
@@ -547,7 +557,16 @@ impl SortedWritesTable {
             to_rebuild,
             rebuild_index,
             subset_tracker: Default::default(),
+            next_fact_id: FactId::new(0),
+            fact_id_map: HashMap::default(),
+            fact_lookup: HashMap::default(),
+            truth_enabled: false,
         }
+    }
+
+    /// Enable truth status tracking for modal logic support
+    pub fn enable_truth_tracking(&mut self) {
+        self.truth_enabled = true;
     }
 
     /// Flush all pending removals, in parallel.
@@ -684,6 +703,13 @@ impl SortedWritesTable {
                             if (self.merge)(exec_state, cur, query, &mut scratch) {
                                 let sort_val = query[sort_by.index()];
                                 let new = self.data.add_row(&scratch);
+                                // Assign fact ID for new merged row
+                                if self.truth_enabled && !self.fact_id_map.contains_key(&new) {
+                                    let fact_id = self.next_fact_id;
+                                    self.next_fact_id = self.next_fact_id.inc();
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                }
                                 if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                     assert!(
                                         sort_val >= largest,
@@ -704,6 +730,13 @@ impl SortedWritesTable {
                             let sort_val = query[sort_by.index()];
                             // New value: update invariants.
                             let new = self.data.add_row(query);
+                            // Assign fact ID for new row
+                            if self.truth_enabled {
+                                let fact_id = self.next_fact_id;
+                                self.next_fact_id = self.next_fact_id.inc();
+                                self.fact_id_map.insert(new, fact_id);
+                                self.fact_lookup.insert(fact_id, new);
+                            }
                             if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                 assert!(
                                     sort_val >= largest,
@@ -748,6 +781,13 @@ impl SortedWritesTable {
                                 .expect("table should not point to stale entry");
                             if (self.merge)(exec_state, cur, query, &mut scratch) {
                                 let new = self.data.add_row(&scratch);
+                                // Assign fact ID for new merged row (unsorted)
+                                if self.truth_enabled && !self.fact_id_map.contains_key(&new) {
+                                    let fact_id = self.next_fact_id;
+                                    self.next_fact_id = self.next_fact_id.inc();
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                }
                                 self.data.set_stale(*row);
                                 *row = new;
                                 changed = true;
@@ -756,6 +796,13 @@ impl SortedWritesTable {
                         } else {
                             // New value: update invariants.
                             let new = self.data.add_row(query);
+                            // Assign fact ID for new row (unsorted)
+                            if self.truth_enabled {
+                                let fact_id = self.next_fact_id;
+                                self.next_fact_id = self.next_fact_id.inc();
+                                self.fact_id_map.insert(new, fact_id);
+                                self.fact_lookup.insert(fact_id, new);
+                            }
                             let (shard, hc) = hash_code(self.hash.shard_data(), query, self.n_keys);
                             debug_assert_eq!(shard, _outer_shard);
                             self.hash.mut_shards()[shard.index()].insert_unique(
@@ -974,6 +1021,47 @@ impl SortedWritesTable {
             }
         }
         if res { Some(row) } else { None }
+    }
+
+    /// Assign a new FactId to a row and update mappings
+    fn assign_fact_id(&mut self, row: RowId) -> FactId {
+        if let Some(&existing_id) = self.fact_id_map.get(&row) {
+            return existing_id;
+        }
+
+        let fact_id = self.next_fact_id;
+        self.next_fact_id = self.next_fact_id.inc();
+
+        self.fact_id_map.insert(row, fact_id);
+        self.fact_lookup.insert(fact_id, row);
+
+        fact_id
+    }
+
+    /// Update fact ID mappings when row IDs change (e.g., during compaction)
+    fn update_fact_mapping(&mut self, old_row: RowId, new_row: RowId) {
+        if let Some(&fact_id) = self.fact_id_map.get(&old_row) {
+            self.fact_id_map.remove(&old_row);
+            self.fact_id_map.insert(new_row, fact_id);
+            self.fact_lookup.insert(fact_id, new_row);
+        }
+    }
+
+    /// Remove fact ID mappings for a deleted row
+    fn remove_fact_mapping(&mut self, row: RowId) {
+        if let Some(fact_id) = self.fact_id_map.remove(&row) {
+            self.fact_lookup.remove(&fact_id);
+        }
+    }
+
+    /// Get the FactId for a row, if it has been assigned one
+    pub fn get_fact_id(&self, row: RowId) -> Option<FactId> {
+        self.fact_id_map.get(&row).copied()
+    }
+
+    /// Get the current RowId for a FactId, if the fact still exists
+    pub fn get_row_by_fact_id(&self, fact_id: FactId) -> Option<RowId> {
+        self.fact_lookup.get(&fact_id).copied()
     }
 
     fn maybe_rehash(&mut self) {

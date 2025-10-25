@@ -179,3 +179,54 @@ fn shard_math() {
     // Picking low numbers should all get shard 0.
     assert!((0..100_000).all(|x| table.shard_data().shard_id(x as u64) == ShardId::new(0)));
 }
+
+#[test]
+fn test_fact_id_assignment_serial() {
+    use crate::table::SortedWritesTable;
+
+    empty_execution_state!(e);
+
+    // Create empty table from scratch
+    let mut table = SortedWritesTable::new(
+        1,      // 1 key column
+        2,      // 2 total columns
+        None,   // No sorting
+        vec![], // No rebuild columns
+        Box::new(|_, _, new, out| {
+            out.clone_from_slice(new);
+            true
+        }), // Simple merge function
+    );
+
+    // Enable truth tracking for this test
+    table.enable_truth_tracking();
+
+    // Insert first row and check fact ID is assigned
+    table.new_buffer().stage_insert(&[v(1), v(2)]);
+    table.merge(&mut e);
+
+    let row = table.get_row(&[v(1)]).expect("row should exist");
+    let fact_id = table.get_fact_id(row.id);
+    assert!(fact_id.is_some(), "Fact ID should be assigned to new row");
+
+    // Insert second row and check it gets a different fact ID
+    table.new_buffer().stage_insert(&[v(3), v(4)]);
+    table.merge(&mut e);
+
+    let row2 = table.get_row(&[v(3)]).expect("second row should exist");
+    let fact_id2 = table.get_fact_id(row2.id);
+    assert!(
+        fact_id2.is_some(),
+        "Fact ID should be assigned to second row"
+    );
+    assert_ne!(
+        fact_id, fact_id2,
+        "Different rows should have different fact IDs"
+    );
+
+    // Test bidirectional lookup
+    if let (Some(fid1), Some(fid2)) = (fact_id, fact_id2) {
+        assert_eq!(table.get_row_by_fact_id(fid1), Some(row.id));
+        assert_eq!(table.get_row_by_fact_id(fid2), Some(row2.id));
+    }
+}
