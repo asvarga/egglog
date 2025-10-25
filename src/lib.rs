@@ -17,6 +17,8 @@ mod cli;
 pub mod constraint;
 mod core;
 pub mod extract;
+#[cfg(test)]
+mod fact_ref_api_tests;
 pub mod prelude;
 pub mod scheduler;
 mod serialize;
@@ -24,8 +26,6 @@ pub mod sort;
 mod termdag;
 mod typechecking;
 pub mod util;
-#[cfg(test)]
-mod fact_ref_api_tests;
 
 // This is used to allow the `add_primitive` macro to work in
 // both this crate and other crates by referring to `::egglog`.

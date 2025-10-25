@@ -20,8 +20,8 @@ use std::{
 use crate::core_relations::{
     BaseValue, BaseValueId, BaseValues, ColumnId, Constraint, ContainerValue, ContainerValues,
     CounterId, Database, DisplacedTable, DisplacedTableWithProvenance, ExecutionState,
-    ExternalFunction, ExternalFunctionId, FactId, FactRef, MergeVal, Offset, PlanStrategy, SortedWritesTable,
-    TableId, TaggedRowBuffer, Value, WrappedTable,
+    ExternalFunction, ExternalFunctionId, FactId, FactRef, MergeVal, Offset, PlanStrategy,
+    SortedWritesTable, TableId, TaggedRowBuffer, Value, WrappedTable,
 };
 use crate::numeric_id::{DenseIdMap, DenseIdMapWithReuse, IdVec, NumericId, define_id};
 use egglog_core_relations as core_relations;
@@ -36,6 +36,8 @@ use proof_spec::{ProofReason, ProofReconstructionState, ReasonSpecId};
 use smallvec::SmallVec;
 use web_time::{Duration, Instant};
 
+#[cfg(test)]
+mod fact_ref_tests;
 pub mod macros;
 pub mod proof_format;
 pub(crate) mod proof_spec;
@@ -43,8 +45,6 @@ pub(crate) mod rule;
 pub mod syntax;
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod fact_ref_tests;
 
 pub use rule::{Function, QueryEntry, RuleBuilder};
 pub use syntax::{SourceExpr, SourceSyntax, TopLevelLhsExpr};
@@ -305,11 +305,11 @@ impl EGraph {
     ///
     /// This function finds or creates a fact reference for the tuple identified by the given key values.
     /// The fact may or may not be asserted (truth tracking depends on table configuration).
-    /// 
+    ///
     /// Returns `None` if the key is not found in the table and cannot be created.
     pub fn create_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<Value> {
         let table = self.db.get_table(table_id);
-        
+
         // Try to find existing row for this key
         if let Some(row) = table.get_row(key) {
             // Look for existing fact ID for this row
@@ -318,7 +318,7 @@ impl EGraph {
                 return Some(self.base_values().get(fact_ref));
             }
         }
-        
+
         // For now, we don't create new facts - just look up existing ones
         // This could be extended to create unasserted fact references
         None
@@ -330,16 +330,16 @@ impl EGraph {
     pub fn resolve_fact_ref(&self, fact_ref_value: Value) -> Option<(TableId, Vec<Value>)> {
         // Extract FactRef from the base value
         let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
-        
+
         let table = self.db.get_table(fact_ref.table_id);
-        
+
         // Look up the row by fact ID
         if let Some(row_id) = table.get_row_by_fact_id(fact_ref.fact_id) {
             if let Some(row) = table.get_row_by_id(row_id) {
                 return Some((fact_ref.table_id, row.vals.to_vec()));
             }
         }
-        
+
         None
     }
 
@@ -350,13 +350,13 @@ impl EGraph {
     /// Returns `Some(false)` if the fact exists but is not asserted (referenced only).
     pub fn is_fact_asserted(&self, fact_ref_value: Value) -> Option<bool> {
         let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
-        
+
         let table = self.db.get_table(fact_ref.table_id);
         table.is_fact_asserted(fact_ref.fact_id)
     }
 
     /// Assert a fact (mark as true) in the database.
-    /// 
+    ///
     /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
     pub fn assert_fact(&mut self, fact_ref_value: Value) -> bool {
         let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
@@ -364,7 +364,7 @@ impl EGraph {
     }
 
     /// Retract a fact (mark as not asserted) in the database.
-    /// 
+    ///
     /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
     pub fn retract_fact(&mut self, fact_ref_value: Value) -> bool {
         let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
@@ -1655,9 +1655,9 @@ impl TableAction {
         let table = state.get_table(self.table);
         if let Some(row) = table.get_row(key) {
             if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
-                return Some(FactRef { 
-                    table_id: self.table, 
-                    fact_id 
+                return Some(FactRef {
+                    table_id: self.table,
+                    fact_id,
                 });
             }
         }
@@ -1668,7 +1668,11 @@ impl TableAction {
     ///
     /// Returns the row data if the fact reference is valid and the fact still exists.
     /// Returns `None` if the fact reference is invalid or the fact has been removed.
-    pub fn resolve_fact_ref(&self, state: &ExecutionState, fact_ref: &FactRef) -> Option<Vec<Value>> {
+    pub fn resolve_fact_ref(
+        &self,
+        state: &ExecutionState,
+        fact_ref: &FactRef,
+    ) -> Option<Vec<Value>> {
         if fact_ref.table_id != self.table {
             // This FactRef is for a different table
             return None;
@@ -2032,7 +2036,10 @@ impl SchemaMath {
     #[allow(dead_code)]
     #[track_caller]
     fn truth_col(&self, truth_enabled: bool) -> usize {
-        assert!(truth_enabled, "truth tracking must be enabled to use truth_col()");
+        assert!(
+            truth_enabled,
+            "truth tracking must be enabled to use truth_col()"
+        );
         let mut offset = self.func_cols + 1; // timestamp
         if self.tracing {
             offset += 1; // proof_id
