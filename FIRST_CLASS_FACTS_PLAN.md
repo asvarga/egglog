@@ -8,7 +8,7 @@
 - ✅ **Phase 1.2b**: Compaction handling - COMPLETED
 - ✅ **Phase 1.3**: BaseValue integration - COMPLETED
 - ✅ **Phase 1.4**: High-level API integration - COMPLETED
-- 🔄 **Phase 1.5**: End-to-end testing - NEXT
+- ✅ **Phase 1.5**: End-to-end testing - COMPLETED
 
 ## Overview
 This plan implements first-class facts in egglog by:
@@ -95,12 +95,13 @@ This plan implements first-class facts in egglog by:
   - [x] Add comprehensive documentation for modal logic usage
   - [x] Create integration tests for high-level API functionality
 
-### 1.5 End-to-end Testing 🔄 CURRENT
-- [ ] **Create comprehensive fact reference tests**
-  - [ ] Test fact references across table operations and compaction
-  - [ ] Test cross-table fact reference resolution
-  - [ ] Test modal logic use cases with fact references
-  - [ ] Add performance benchmarks for fact operations
+### 1.5 End-to-end Testing ✅ COMPLETE
+- [x] **Create comprehensive fact reference tests**
+  - [x] Test fact references across table operations and compaction
+  - [x] Test cross-table fact reference resolution
+  - [x] Test modal logic use cases with fact references
+  - [x] Add performance benchmarks for fact operations
+- **Status**: Complete - comprehensive test suite created in `tests/fact_ref_end_to_end_tests.rs` with all tests passing
 
 ## Phase 2: Integration with Value System
 
