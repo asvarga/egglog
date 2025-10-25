@@ -625,7 +625,10 @@ impl SortedWritesTable {
 
     /// Flush all pending removals, in parallel.
     fn parallel_delete(&mut self) -> bool {
+        use std::sync::Mutex;
+
         let shard_data = self.hash.shard_data();
+        let rows_to_cleanup = Mutex::new(Vec::new());
         let stale_delta: usize = self
             .hash
             .mut_shards()
@@ -641,6 +644,7 @@ impl SortedWritesTable {
             .map(|(shard_id, shard)| {
                 let queue = &self.pending_state.pending_removals[shard_id];
                 let mut marked_stale = 0;
+                let mut local_cleanup = Vec::new();
                 while let Some(buf) = queue.pop() {
                     buf.for_each(|to_remove| {
                         let (actual_shard, hc) = hash_code(shard_data, to_remove, self.n_keys);
@@ -658,21 +662,37 @@ impl SortedWritesTable {
                             // different `shards` partition the space
                             // (guaranteed by the assertion above), and we
                             // launch at most one thread per shard.
-                            marked_stale +=
-                                unsafe { !self.data.data.set_stale_shared(ent.row) } as usize;
+                            if unsafe { !self.data.data.set_stale_shared(ent.row) } {
+                                marked_stale += 1;
+                                local_cleanup.push(ent.row);
+                            }
                         }
                     });
+                }
+                if !local_cleanup.is_empty() {
+                    rows_to_cleanup.lock().unwrap().extend(local_cleanup);
                 }
                 marked_stale
             })
             .sum();
         // Update the stale count with the total marked stale.
         self.data.stale_rows += stale_delta;
+
+        // Clean up fact mappings after parallel deletion
+        if self.truth_enabled {
+            let cleanup_rows = rows_to_cleanup.into_inner().unwrap();
+            for row in cleanup_rows {
+                self.remove_fact_mapping(row);
+            }
+        }
+
         stale_delta > 0
     }
     fn serial_delete(&mut self) -> bool {
         let shard_data = self.hash.shard_data();
         let mut changed = false;
+        let mut rows_to_cleanup = Vec::new();
+
         self.hash
             .mut_shards()
             .iter_mut()
@@ -691,11 +711,20 @@ impl SortedWritesTable {
                         }) {
                             let (ent, _) = entry.remove();
                             self.data.set_stale(ent.row);
+                            rows_to_cleanup.push(ent.row);
                             changed = true;
                         }
                     })
                 }
             });
+
+        // Clean up fact mappings after iteration
+        if self.truth_enabled {
+            for row in rows_to_cleanup {
+                self.remove_fact_mapping(row);
+            }
+        }
+
         changed
     }
 
@@ -734,6 +763,7 @@ impl SortedWritesTable {
         let mut changed = false;
         let n_keys = self.n_keys;
         let mut scratch = with_pool_set(|ps| ps.get::<Vec<Value>>());
+        let mut fact_mapping_updates: Vec<(RowId, RowId)> = Vec::new();
         for (_outer_shard, queue) in self.pending_state.pending_rows.iter() {
             if let Some(sort_by) = self.sort_by {
                 while let Some(buf) = queue.pop() {
@@ -834,15 +864,13 @@ impl SortedWritesTable {
                                 .get_row(*row)
                                 .expect("table should not point to stale entry");
                             if (self.merge)(exec_state, cur, query, &mut scratch) {
+                                let old_row = *row;
                                 let new = self.data.add_row(&scratch);
-                                // Assign fact ID for new merged row (unsorted)
-                                if self.truth_enabled && !self.fact_id_map.contains_key(&new) {
-                                    let fact_id = self.next_fact_id;
-                                    self.next_fact_id = self.next_fact_id.inc();
-                                    self.fact_id_map.insert(new, fact_id);
-                                    self.fact_lookup.insert(fact_id, new);
+                                // Store fact mapping update for later
+                                if self.truth_enabled {
+                                    fact_mapping_updates.push((old_row, new));
                                 }
-                                self.data.set_stale(*row);
+                                self.data.set_stale(old_row);
                                 *row = new;
                                 changed = true;
                             }
@@ -873,6 +901,12 @@ impl SortedWritesTable {
                 }
             };
         }
+
+        // Apply fact mapping updates after all insertions are complete
+        for (old_row, new_row) in fact_mapping_updates {
+            self.update_fact_mapping(old_row, new_row);
+        }
+
         changed
     }
 
@@ -1131,6 +1165,31 @@ impl SortedWritesTable {
     /// Get the current RowId for a FactId, if the fact still exists
     pub fn get_row_by_fact_id(&self, fact_id: FactId) -> Option<RowId> {
         self.fact_lookup.get(&fact_id).copied()
+    }
+
+    /// Get the fact values directly by FactId
+    pub fn get_fact_values(&self, fact_id: FactId) -> Option<Vec<Value>> {
+        if let Some(row_id) = self.get_row_by_fact_id(fact_id) {
+            if let Some(row_data) = self.data.get_row(row_id) {
+                Some(row_data.to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Iterate over all facts in the table
+    pub fn iter_facts(&self) -> impl Iterator<Item = (FactId, &[Value])> + '_ {
+        self.fact_lookup.iter().filter_map(|(fact_id, row_id)| {
+            self.data.get_row(*row_id).map(|values| (*fact_id, values))
+        })
+    }
+
+    /// Get all fact IDs currently in the table
+    pub fn get_all_fact_ids(&self) -> Vec<FactId> {
+        self.fact_lookup.keys().copied().collect()
     }
 
     fn maybe_rehash(&mut self) {
