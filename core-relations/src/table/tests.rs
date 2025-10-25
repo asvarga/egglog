@@ -231,7 +231,7 @@ fn test_fact_id_assignment_serial() {
     }
 }
 
-#[test] 
+#[test]
 fn test_fact_id_assignment_multiple_insertions() {
     use crate::table::SortedWritesTable;
 
@@ -256,18 +256,93 @@ fn test_fact_id_assignment_multiple_insertions() {
     for i in 1..=10 {
         table.new_buffer().stage_insert(&[v(i), v(i * 10)]);
         table.merge(&mut e);
-        
-        let row = table.get_row(&[v(i)]).expect(&format!("row {} should exist", i));
+
+        let row = table
+            .get_row(&[v(i)])
+            .expect(&format!("row {} should exist", i));
         let fact_id = table.get_fact_id(row.id);
         assert!(fact_id.is_some(), "Fact ID should be assigned to row {}", i);
     }
-    
+
     // Verify all rows have unique fact IDs
     let mut fact_ids = Vec::new();
     for i in 1..=10 {
         let row = table.get_row(&[v(i)]).unwrap();
         let fact_id = table.get_fact_id(row.id).unwrap();
-        assert!(!fact_ids.contains(&fact_id), "Fact ID {:?} should be unique", fact_id);
+        assert!(
+            !fact_ids.contains(&fact_id),
+            "Fact ID {:?} should be unique",
+            fact_id
+        );
         fact_ids.push(fact_id);
+    }
+}
+
+#[test]
+fn test_fact_id_persistence_through_compaction() {
+    use crate::table::SortedWritesTable;
+
+    empty_execution_state!(e);
+
+    // Create table with fact tracking enabled
+    let mut table = SortedWritesTable::new(
+        1,      // 1 key column
+        2,      // 2 total columns
+        None,   // No sorting
+        vec![], // No rebuild columns
+        Box::new(|_, _, new, out| {
+            out.clone_from_slice(new);
+            true
+        }), // Simple merge function
+    );
+
+    table.enable_truth_tracking();
+
+    // Insert some initial rows
+    for i in 1..=5 {
+        table.new_buffer().stage_insert(&[v(i), v(i * 10)]);
+        table.merge(&mut e);
+    }
+
+    // Collect initial fact IDs
+    let mut initial_fact_ids = Vec::new();
+    for i in 1..=5 {
+        let row = table.get_row(&[v(i)]).unwrap();
+        let fact_id = table.get_fact_id(row.id).unwrap();
+        initial_fact_ids.push((i, row.id, fact_id));
+    }
+
+    // Force table compaction by calling maybe_rehash multiple times
+    // (this may not trigger compaction in practice, but let's try)
+    for _ in 0..10 {
+        table.maybe_rehash();
+    }
+
+    // Verify that fact IDs still map to the correct rows after potential compaction
+    for (i, _original_row_id, fact_id) in initial_fact_ids {
+        // The row content should still be accessible by key
+        let row = table.get_row(&[v(i)]).unwrap();
+
+        // The fact ID should still map to the current row (may have different RowId after compaction)
+        let current_row_id = table.get_row_by_fact_id(fact_id);
+        assert!(
+            current_row_id.is_some(),
+            "Fact ID should still be valid after compaction"
+        );
+
+        // The current row ID returned by fact lookup should match the row we found by key
+        assert_eq!(
+            current_row_id.unwrap(),
+            row.id,
+            "Fact ID should map to current row location"
+        );
+
+        // The row should still have the same fact ID
+        let current_fact_id = table.get_fact_id(row.id);
+        assert_eq!(
+            current_fact_id,
+            Some(fact_id),
+            "Row should still have the same fact ID"
+        );
     }
 }

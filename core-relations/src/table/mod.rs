@@ -955,7 +955,7 @@ impl SortedWritesTable {
             })
             .collect_vec_list();
         self.data.data = row_writer.finish();
-        
+
         // Assign fact IDs to all new rows created during parallel insertion
         if self.truth_enabled {
             let current_row_count = self.data.next_row();
@@ -969,7 +969,7 @@ impl SortedWritesTable {
                 }
             }
         }
-        
+
         // Now we just need to reset our invariants.
 
         // Confirm none of the writes violated sort order and update the
@@ -1105,6 +1105,13 @@ impl SortedWritesTable {
             self.rehash();
             return;
         };
+
+        // Fall back to serial rehash when fact tracking is enabled to ensure correct
+        // fact ID mapping updates during compaction
+        if self.truth_enabled {
+            self.rehash();
+            return;
+        }
         self.generation = self.generation.inc();
         assert!(!self.offsets.is_empty());
         struct TimestampStats {
@@ -1281,13 +1288,53 @@ impl SortedWritesTable {
 
     fn rehash(&mut self) {
         self.generation = self.generation.inc();
-        Self::rehash_impl(
-            self.sort_by,
-            self.n_keys,
-            &mut self.data,
-            &mut self.offsets,
-            &mut self.hash,
-        )
+
+        // Handle fact ID mapping updates during compaction
+        if self.truth_enabled {
+            let mut fact_updates = Vec::new();
+            if let Some(sort_by) = self.sort_by {
+                self.offsets.clear();
+                self.data.remove_stale(|row, old, new| {
+                    // Collect fact ID mapping updates for later processing
+                    fact_updates.push((old, new));
+
+                    let stale_entry = get_entry_mut(row, self.n_keys, &mut self.hash, |x| x == old)
+                        .expect("non-stale entry not mapped in hash");
+                    *stale_entry = new;
+                    let sort_col = row[sort_by.index()];
+                    if let Some((max, _)) = self.offsets.last() {
+                        if sort_col > *max {
+                            self.offsets.push((sort_col, new));
+                        }
+                    } else {
+                        self.offsets.push((sort_col, new));
+                    }
+                })
+            } else {
+                self.data.remove_stale(|row, old, new| {
+                    // Collect fact ID mapping updates for later processing
+                    fact_updates.push((old, new));
+
+                    let stale_entry = get_entry_mut(row, self.n_keys, &mut self.hash, |x| x == old)
+                        .expect("non-stale entry not mapped in hash");
+                    *stale_entry = new;
+                })
+            }
+
+            // Apply fact ID mapping updates after compaction
+            for (old, new) in fact_updates {
+                self.update_fact_mapping(old, new);
+            }
+        } else {
+            // Use the original implementation when fact tracking is disabled
+            Self::rehash_impl(
+                self.sort_by,
+                self.n_keys,
+                &mut self.data,
+                &mut self.offsets,
+                &mut self.hash,
+            )
+        }
     }
 }
 
