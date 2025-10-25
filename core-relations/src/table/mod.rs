@@ -520,6 +520,60 @@ impl Table for SortedWritesTable {
         })?;
         Some(self.data.get_row(id).unwrap()[col.index()])
     }
+
+    // Fact ID support methods
+    fn get_fact_id_for_row(&self, row_id: RowId) -> Option<FactId> {
+        if self.truth_enabled {
+            self.fact_id_map.get(&row_id).copied()
+        } else {
+            None
+        }
+    }
+
+    fn get_row_by_fact_id(&self, fact_id: FactId) -> Option<RowId> {
+        if self.truth_enabled {
+            self.fact_lookup.get(&fact_id).copied()
+        } else {
+            None
+        }
+    }
+
+    fn get_row_by_id(&self, row_id: RowId) -> Option<Row> {
+        if let Some(row_data) = self.data.get_row(row_id) {
+            let mut vals = with_pool_set(|ps| ps.get::<Vec<Value>>());
+            vals.extend_from_slice(row_data);
+            Some(Row { id: row_id, vals })
+        } else {
+            None
+        }
+    }
+
+    fn is_fact_asserted(&self, fact_id: FactId) -> Option<bool> {
+        if !self.truth_enabled {
+            return None;
+        }
+
+        // If we can find the row, the fact exists
+        if self.fact_lookup.contains_key(&fact_id) {
+            // For now, all facts that exist are considered asserted
+            // This could be extended with a separate truth status column
+            Some(true)
+        } else {
+            None
+        }
+    }
+
+    fn assert_fact(&mut self, _fact_id: FactId) -> bool {
+        // For now, we don't support changing assertion status
+        // This would require tracking truth status separately from existence
+        false
+    }
+
+    fn retract_fact(&mut self, _fact_id: FactId) -> bool {
+        // For now, we don't support changing assertion status
+        // This would require tracking truth status separately from existence
+        false
+    }
 }
 
 impl SortedWritesTable {

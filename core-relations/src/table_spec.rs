@@ -19,7 +19,7 @@ use crate::{
         Bindings, ExecutionState,
         mask::{Mask, MaskIter, ValueSource},
     },
-    common::Value,
+    common::{FactId, Value},
     hash_index::{ColumnIndex, IndexBase, TupleIndex},
     offsets::{RowId, Subset, SubsetRef},
     pool::{PoolSet, Pooled, with_pool_set},
@@ -331,6 +331,38 @@ pub trait Table: Any + Send + Sync {
 
     /// Create a new buffer for staging mutations on this table.
     fn new_buffer(&self) -> Box<dyn MutationBuffer>;
+
+    // Fact ID support for first-class facts and modal logic:
+
+    /// Get the fact ID for a row, if fact tracking is enabled.
+    fn get_fact_id_for_row(&self, _row_id: RowId) -> Option<FactId> {
+        None // Default implementation: no fact tracking
+    }
+
+    /// Get the row ID for a fact ID, if it exists.
+    fn get_row_by_fact_id(&self, _fact_id: FactId) -> Option<RowId> {
+        None // Default implementation: no fact tracking
+    }
+
+    /// Get row data by row ID, if it exists.
+    fn get_row_by_id(&self, _row_id: RowId) -> Option<Row> {
+        None // Default implementation: not supported
+    }
+
+    /// Check if a fact is asserted (vs just referenced), if fact tracking is enabled.
+    fn is_fact_asserted(&self, _fact_id: FactId) -> Option<bool> {
+        None // Default implementation: no fact tracking
+    }
+
+    /// Assert a fact (mark as true), if fact tracking is enabled.
+    fn assert_fact(&mut self, _fact_id: FactId) -> bool {
+        false // Default implementation: no fact tracking
+    }
+
+    /// Retract a fact (mark as not asserted), if fact tracking is enabled.
+    fn retract_fact(&mut self, _fact_id: FactId) -> bool {
+        false // Default implementation: no fact tracking
+    }
 }
 
 /// A trait specifying a buffer of pending mutations for a [`Table`].

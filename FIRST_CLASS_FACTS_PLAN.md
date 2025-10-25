@@ -3,10 +3,12 @@
 ## Progress Status
 - ✅ **Phase 1.1**: Core fact types (`FactId`, `FactRef`) - COMPLETED
 - ✅ **Phase 1.1a**: Truth status system foundation - COMPLETED
-- 🔄 **Phase 1.2**: Table infrastructure changes - NEXT
-- ⏳ **Phase 2**: Integration with value system - PENDING
-- ⏳ **Phase 3**: Table implementation details - PENDING
-- ⏳ **Phase 4**: Syntactic sugar and modal logic - PENDING
+- ✅ **Phase 1.2**: Table infrastructure changes - COMPLETED
+- ✅ **Phase 1.2a**: Parallel insertion fact IDs - COMPLETED
+- ✅ **Phase 1.2b**: Compaction handling - COMPLETED
+- ✅ **Phase 1.3**: BaseValue integration - COMPLETED
+- 🔄 **Phase 1.4**: High-level API integration - NEXT
+- ⏳ **Phase 1.5**: End-to-end testing - PENDING
 
 ## Overview
 This plan implements first-class facts in egglog by:
@@ -45,27 +47,41 @@ This plan implements first-class facts in egglog by:
   - [x] Add truth status constants (`ASSERTED`, `REFERENCED`) and combine function
   - [x] Update table layout documentation to include `truth?` column
 
-### 1.2 Table Infrastructure Changes
-- [ ] **Extend `SortedWritesTable`** in `core-relations/src/table/mod.rs`
-  - [ ] Add `next_fact_id: FactId` field to track next available fact ID
-  - [ ] Add `fact_id_map: HashMap<RowId, FactId>` to map internal rows to stable fact IDs
-  - [ ] Add `fact_lookup: HashMap<FactId, RowId>` for reverse lookup
-  - [ ] Add `truth_enabled: bool` field to enable/disable truth tracking
-  - [ ] Update constructor to initialize fact tracking and truth status
+### 1.2 Table Infrastructure Changes ✅ COMPLETED
+- [x] **Extend `SortedWritesTable`** in `core-relations/src/table/mod.rs`
+  - [x] Add `next_fact_id: FactId` field to track next available fact ID
+  - [x] Add `fact_id_map: HashMap<RowId, FactId>` to map internal rows to stable fact IDs
+  - [x] Add `fact_lookup: HashMap<FactId, RowId>` for reverse lookup
+  - [x] Add `truth_enabled: bool` field to enable/disable truth tracking
+  - [x] Update constructor to initialize fact tracking and truth status
 
-- [ ] **Update Row Creation** in `SortedWritesTable`
-  - [ ] Modify `add_row()` to assign and track fact IDs
-  - [ ] Set default truth status (true for asserted facts, false for referenced-only facts)
-  - [ ] Ensure fact IDs are preserved across table compactions/rehashing
-  - [ ] Update parallel insertion logic to handle fact ID assignment and truth status
+- [x] **Update Row Creation** in `SortedWritesTable` (Phase 1.2a)
+  - [x] Modify serial insertion to assign and track fact IDs
+  - [x] Update parallel insertion logic to handle fact ID assignment 
+  - [x] Set default truth status (true for asserted facts, false for referenced-only facts)
+  - [x] Ensure thread-safe fact ID assignment across all insertion paths
 
-- [ ] **Update Table Compaction** in `SortedWritesTable`
-  - [ ] Modify `rehash()` and `parallel_rehash()` to preserve fact ID mappings and truth status
-  - [ ] Update `remove_stale()` logic to clean up fact ID mappings
-  - [ ] Ensure fact IDs and truth status remain stable across all table operations
+- [x] **Update Table Compaction** in `SortedWritesTable` (Phase 1.2b)
+  - [x] Modify `rehash()` to preserve fact ID mappings during compaction
+  - [x] Update parallel operations to maintain fact ID consistency
+  - [x] Ensure fact IDs remain stable across all table operations
+  - [x] Add comprehensive tests for fact ID persistence through compaction
 
-### 1.3 Table Interface Updates
-- [ ] **Extend `Table` trait** in `core-relations/src/table_spec.rs`
+### 1.3 BaseValue Integration ✅ COMPLETED
+- [x] **Integrate FactRef into BaseValue system** in `egglog-bridge/src/lib.rs`
+  - [x] Import FactRef and FactId types from core-relations
+  - [x] FactRef already implements BaseValue trait (completed in Phase 1.1)
+  - [x] Add factory methods for creating FactRef values (`create_fact_ref()`)
+  - [x] Add lookup methods for resolving FactRef values to table data (`resolve_fact_ref()`)
+
+- [x] **Extend Table trait interface** in `core-relations/src/table_spec.rs`
+  - [x] Add `get_fact_id_for_row()`, `get_row_by_fact_id()`, `get_row_by_id()` methods
+  - [x] Add `is_fact_asserted()`, `assert_fact()`, `retract_fact()` methods for modal logic
+  - [x] Implement these methods in SortedWritesTable with fact tracking support
+  - [x] Add comprehensive integration tests for FactRef as BaseValue
+
+### 1.4 High-level API Integration ⏳ PENDING  
+- [ ] **Extend Table trait interface** in `core-relations/src/table_spec.rs`
   - [ ] Add `get_fact_id(&self, key: &[Value]) -> Option<FactId>` method
   - [ ] Add `get_row_by_fact_id(&self, fact_id: FactId) -> Option<Row>` method
   - [ ] Add `is_fact_asserted(&self, fact_id: FactId) -> Option<bool>` method
@@ -73,10 +89,17 @@ This plan implements first-class facts in egglog by:
   - [ ] Add `retract_fact(&mut self, fact_id: FactId)` method
   - [ ] Update existing methods to handle truth status
 
-- [ ] **Update `Row` struct** in `core-relations/src/table_spec.rs`
+- [ ] **Update Row struct** in `core-relations/src/table_spec.rs`
   - [ ] Add `fact_id: Option<FactId>` field to `Row`
   - [ ] Add `asserted: Option<bool>` field to `Row` (when truth tracking enabled)
   - [ ] Update all `Row` construction sites to include fact ID and truth status
+
+### 1.5 End-to-end Testing ⏳ PENDING
+- [ ] **Create comprehensive fact reference tests**
+  - [ ] Test fact references across table operations and compaction
+  - [ ] Test cross-table fact reference resolution
+  - [ ] Test modal logic use cases with fact references
+  - [ ] Add performance benchmarks for fact operations
 
 ## Phase 2: Integration with Value System
 

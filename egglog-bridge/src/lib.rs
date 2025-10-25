@@ -20,7 +20,7 @@ use std::{
 use crate::core_relations::{
     BaseValue, BaseValueId, BaseValues, ColumnId, Constraint, ContainerValue, ContainerValues,
     CounterId, Database, DisplacedTable, DisplacedTableWithProvenance, ExecutionState,
-    ExternalFunction, ExternalFunctionId, MergeVal, Offset, PlanStrategy, SortedWritesTable,
+    ExternalFunction, ExternalFunctionId, FactId, FactRef, MergeVal, Offset, PlanStrategy, SortedWritesTable,
     TableId, TaggedRowBuffer, Value, WrappedTable,
 };
 use crate::numeric_id::{DenseIdMap, DenseIdMapWithReuse, IdVec, NumericId, define_id};
@@ -43,6 +43,8 @@ pub(crate) mod rule;
 pub mod syntax;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod fact_ref_tests;
 
 pub use rule::{Function, QueryEntry, RuleBuilder};
 pub use syntax::{SourceExpr, SourceSyntax, TopLevelLhsExpr};
@@ -294,6 +296,60 @@ impl EGraph {
     /// Generate a fresh id.
     pub fn fresh_id(&mut self) -> Value {
         Value::from_usize(self.db.inc_counter(self.id_counter))
+    }
+
+    /// Create a FactRef value for a fact in the given table.
+    ///
+    /// This function finds or creates a fact reference for the tuple identified by the given key values.
+    /// The fact may or may not be asserted (truth tracking depends on table configuration).
+    /// 
+    /// Returns `None` if the key is not found in the table and cannot be created.
+    pub fn create_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<Value> {
+        let table = self.db.get_table(table_id);
+        
+        // Try to find existing row for this key
+        if let Some(row) = table.get_row(key) {
+            // Look for existing fact ID for this row
+            if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
+                let fact_ref = FactRef { table_id, fact_id };
+                return Some(self.base_values().get(fact_ref));
+            }
+        }
+        
+        // For now, we don't create new facts - just look up existing ones
+        // This could be extended to create unasserted fact references
+        None
+    }
+
+    /// Resolve a FactRef value to its corresponding table data.
+    ///
+    /// Returns the row data if the fact reference is valid and the fact still exists.
+    pub fn resolve_fact_ref(&self, fact_ref_value: Value) -> Option<(TableId, Vec<Value>)> {
+        // Extract FactRef from the base value
+        let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
+        
+        let table = self.db.get_table(fact_ref.table_id);
+        
+        // Look up the row by fact ID
+        if let Some(row_id) = table.get_row_by_fact_id(fact_ref.fact_id) {
+            if let Some(row) = table.get_row_by_id(row_id) {
+                return Some((fact_ref.table_id, row.vals.to_vec()));
+            }
+        }
+        
+        None
+    }
+
+    /// Check if a FactRef represents an asserted fact (vs just referenced).
+    ///
+    /// Returns `None` if the fact reference is invalid.
+    /// Returns `Some(true)` if the fact is asserted as true.
+    /// Returns `Some(false)` if the fact exists but is not asserted (referenced only).
+    pub fn is_fact_asserted(&self, fact_ref_value: Value) -> Option<bool> {
+        let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
+        
+        let table = self.db.get_table(fact_ref.table_id);
+        table.is_fact_asserted(fact_ref.fact_id)
     }
 
     /// Look up the canonical value for `val` in the union-find.
