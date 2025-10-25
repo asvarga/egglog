@@ -101,6 +101,7 @@ impl<K: NumericId, V> Clear for DenseIdMap<K, V> {
 }
 
 define_id!(pub Value, u32, "A generic identifier representing an egglog value");
+define_id!(pub FactId, u32, "A stable identifier for facts/tuples in tables, survives compaction");
 
 impl Value {
     pub(crate) fn stale() -> Self {

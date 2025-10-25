@@ -288,3 +288,45 @@ fn roundtrip_medium_integers_interned() {
         }
     }
 }
+
+#[test]
+fn test_fact_ref_roundtrip() {
+    use super::{BaseValues, FactRef};
+    use crate::numeric_id::NumericId;
+    use crate::{FactId, TableId};
+
+    let mut bases = BaseValues::default();
+    bases.register_type::<FactRef>();
+
+    // Create some sample fact references
+    let fact_ref1 = FactRef {
+        table_id: TableId::new(42),
+        fact_id: FactId::new(123),
+    };
+    let fact_ref2 = FactRef {
+        table_id: TableId::new(0),
+        fact_id: FactId::new(0),
+    };
+    let fact_ref3 = FactRef {
+        table_id: TableId::new(999),
+        fact_id: FactId::new(456789),
+    };
+
+    // Test intern and retrieve
+    let boxed1 = bases.get(fact_ref1.clone());
+    let boxed2 = bases.get(fact_ref2.clone());
+    let boxed3 = bases.get(fact_ref3.clone());
+
+    // Test unwrap
+    let unboxed1 = bases.unwrap::<FactRef>(boxed1);
+    let unboxed2 = bases.unwrap::<FactRef>(boxed2);
+    let unboxed3 = bases.unwrap::<FactRef>(boxed3);
+
+    assert_eq!(fact_ref1, unboxed1);
+    assert_eq!(fact_ref2, unboxed2);
+    assert_eq!(fact_ref3, unboxed3);
+
+    // Test deduplication - same FactRef should return same Value
+    let boxed1_again = bases.get(fact_ref1.clone());
+    assert_eq!(boxed1, boxed1_again);
+}

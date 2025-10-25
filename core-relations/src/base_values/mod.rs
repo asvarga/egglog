@@ -8,7 +8,8 @@ use std::{
 
 use crate::numeric_id::{DenseIdMap, NumericId, define_id};
 
-use crate::common::{HashMap, InternTable, Value};
+use crate::TableId;
+use crate::common::{FactId, HashMap, InternTable, Value};
 
 #[cfg(test)]
 mod tests;
@@ -44,6 +45,21 @@ pub trait BaseValue: Clone + Hash + Eq + Any + Debug + Send + Sync {
 impl BaseValue for String {}
 impl BaseValue for &'static str {}
 impl BaseValue for num::Rational64 {}
+
+/// A reference to a fact (tuple/row) in a table.
+///
+/// This enables first-class facts and modal logic by allowing references to tuples
+/// that may or may not be asserted as true. The fact reference is stable across
+/// table operations (unlike RowId which can change during compaction).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FactRef {
+    /// The table containing this fact
+    pub table_id: TableId,
+    /// The stable ID for this fact within the table
+    pub fact_id: FactId,
+}
+
+impl BaseValue for FactRef {}
 
 /// A wrapper used to print a base value.
 ///

@@ -23,8 +23,8 @@ pub(crate) mod uf;
 mod tests;
 
 pub use action::{ExecutionState, MergeVal, QueryEntry, WriteVal};
-pub use base_values::{BaseValue, BaseValueId, BaseValuePrinter, BaseValues, Boxed};
-pub use common::Value;
+pub use base_values::{BaseValue, BaseValueId, BaseValuePrinter, BaseValues, Boxed, FactRef};
+pub use common::{FactId, Value};
 pub use containers::{ContainerValue, ContainerValueId, ContainerValues};
 pub use free_join::{
     AtomId, CounterId, Database, ExternalFunction, ExternalFunctionId, TableId, Variable,

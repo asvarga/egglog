@@ -1,23 +1,41 @@
 # First-Class Facts Implementation Plan
 
+## Progress Status
+- ✅ **Phase 1.1**: Core fact types (`FactId`, `FactRef`) - COMPLETED
+- 🔄 **Phase 1.1a**: Truth status system - NEXT
+- ⏳ **Phase 1.2**: Table infrastructure changes - PENDING
+- ⏳ **Phase 2**: Integration with value system - PENDING
+- ⏳ **Phase 3**: Table implementation details - PENDING
+- ⏳ **Phase 4**: Syntactic sugar and modal logic - PENDING
+
 ## Overview
 This plan implements first-class facts in egglog by:
 1. Adding stable, unique IDs to tuples/rows in relation tables
 2. Creating a `FactRef` BaseValue type that references these tuples
 3. Enabling facts to be used as regular values in the egglog system
+4. Supporting modal logic with truth status tracking
 
 ## Phase 1: Core Infrastructure
 
-### 1.1 Define Fact Types
-- [ ] **Create `FactId` type** in `core-relations/src/common.rs`
-  - [ ] Define `FactId` as a numeric ID type using `define_id!` macro
-  - [ ] Ensure `FactId` is stable across table operations (unlike `RowId`)
+### 1.1 Define Fact Types ✅ COMPLETED
+- [x] **Create `FactId` type** in `core-relations/src/common.rs`
+  - [x] Define `FactId` as a numeric ID type using `define_id!` macro
+  - [x] Ensure `FactId` is stable across table operations (unlike `RowId`)
 
-- [ ] **Create `FactRef` BaseValue** in `core-relations/src/base_values/mod.rs`
-  - [ ] Define `FactRef` struct with `table_id: TableId` and `fact_id: FactId`
-  - [ ] Implement `BaseValue` trait for `FactRef`
-  - [ ] Consider `MAY_UNBOX` optimization if `FactRef` fits in 31 bits
-  - [ ] Implement `Debug`, `Clone`, `Hash`, `Eq` traits
+- [x] **Create `FactRef` BaseValue** in `core-relations/src/base_values/mod.rs`
+  - [x] Define `FactRef` struct with `table_id: TableId` and `fact_id: FactId`
+  - [x] Implement `BaseValue` trait for `FactRef`
+  - [x] Consider `MAY_UNBOX` optimization if `FactRef` fits in 31 bits (decided against for simplicity)
+  - [x] Implement `Debug`, `Clone`, `Hash`, `Eq` traits
+
+- [x] **Export Types** in `core-relations/src/lib.rs`
+  - [x] Export `FactRef` and `FactId` through public API
+  - [x] Enable usage in higher-level modules
+
+- [x] **Add Tests** in `core-relations/src/base_values/tests.rs`
+  - [x] Implement `test_fact_ref_roundtrip` for BaseValue functionality
+  - [x] Test interning, retrieval, and deduplication behavior
+  - [x] Verify edge cases with zero and large ID values
 
 ### 1.1a Truth Status System
 - [ ] **Add Truth Status Column Support**
@@ -62,14 +80,14 @@ This plan implements first-class facts in egglog by:
 ## Phase 2: Integration with Value System
 
 ### 2.1 BaseValue Integration
-- [ ] **Register FactRef in BaseValues** in `core-relations/src/lib.rs`
-  - [ ] Export `FactRef` and `FactId` types
-  - [ ] Ensure proper module organization
+- [x] **Register FactRef in BaseValues** in `core-relations/src/lib.rs`
+  - [x] Export `FactRef` and `FactId` types
+  - [x] Ensure proper module organization
 
-- [ ] **Integration Tests** in `core-relations/src/base_values/tests.rs`
-  - [ ] Add roundtrip tests for `FactRef` values
-  - [ ] Test `FactRef` interning and retrieval
-  - [ ] Verify `FactRef` hashing and equality semantics
+- [x] **Integration Tests** in `core-relations/src/base_values/tests.rs`
+  - [x] Add roundtrip tests for `FactRef` values
+  - [x] Test `FactRef` interning and retrieval
+  - [x] Verify `FactRef` hashing and equality semantics
 
 ### 2.2 Database Integration
 - [ ] **Update `Database`** in `core-relations/src/free_join/mod.rs`
