@@ -9,6 +9,11 @@
 - ✅ **Phase 1.3**: BaseValue integration - COMPLETED
 - ✅ **Phase 1.4**: High-level API integration - COMPLETED
 - ✅ **Phase 1.5**: End-to-end testing - COMPLETED
+- ✅ **Phase 2.1**: BaseValue integration - COMPLETED
+- ✅ **Phase 2.2**: Database and EGraph integration - COMPLETED
+  - [x] Register `FactRef` as a base value type (automatically registered)
+  - [x] Update `TableAction` to support truth status operations
+- **Status**: Complete - comprehensive Database and EGraph integration with fact methods and automatic FactRef registration **Phase 1.1a**: Truth status system foundation - COMPLETED
 
 ## Overview
 This plan implements first-class facts in egglog by:

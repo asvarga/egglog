@@ -25,10 +25,10 @@ mod fact_ref_high_level_api_tests {
 
     #[test]
     fn test_fact_ref_in_egraph() {
-        let mut egraph = EGraph::default();
+        let egraph = EGraph::default();
 
-        // Register FactRef as a base value type
-        egraph.backend.base_values_mut().register_type::<FactRef>();
+        // FactRef is now automatically registered as a base value type
+        // No manual registration needed!
 
         // Create a sample FactRef and convert to Value
         use core_relations::{FactId, TableId};

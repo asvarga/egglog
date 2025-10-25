@@ -193,6 +193,9 @@ impl EGraph {
         let term_consistency_table =
             db.add_table(DisplacedTable::default(), iter::empty(), iter::empty());
 
+        // Register FactRef as a base value type for first-class facts support
+        db.base_values_mut().register_type::<FactRef>();
+
         Self {
             db,
             uf_table,
@@ -350,6 +353,22 @@ impl EGraph {
         
         let table = self.db.get_table(fact_ref.table_id);
         table.is_fact_asserted(fact_ref.fact_id)
+    }
+
+    /// Assert a fact (mark as true) in the database.
+    /// 
+    /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
+    pub fn assert_fact(&mut self, fact_ref_value: Value) -> bool {
+        let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
+        self.db.assert_fact(&fact_ref)
+    }
+
+    /// Retract a fact (mark as not asserted) in the database.
+    /// 
+    /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
+    pub fn retract_fact(&mut self, fact_ref_value: Value) -> bool {
+        let fact_ref = self.base_values().unwrap::<FactRef>(fact_ref_value);
+        self.db.retract_fact(&fact_ref)
     }
 
     /// Look up the canonical value for `val` in the union-find.
@@ -1680,31 +1699,29 @@ impl TableAction {
 
     /// Assert a fact (mark as true) if fact tracking is enabled.
     ///
-    /// For now, this is a placeholder that returns false.
-    /// Full implementation would require extending the mutation staging system
-    /// to handle truth status changes separately from row insertion/deletion.
+    /// Note: This requires access to the EGraph to modify truth status.
+    /// For now, this is a placeholder until the staging system supports truth operations.
     pub fn assert_fact(&self, _state: &mut ExecutionState, fact_ref: &FactRef) -> bool {
         if fact_ref.table_id != self.table {
             return false;
         }
 
-        // TODO: Implement truth status mutation staging
-        // This would require a new type of staged operation for truth changes
+        // TODO: Implement truth status staging or direct access via EGraph
+        // This would be handled by the EGraph.assert_fact method
         false
     }
 
     /// Retract a fact (mark as not asserted) if fact tracking is enabled.
     ///
-    /// For now, this is a placeholder that returns false.
-    /// Full implementation would require extending the mutation staging system
-    /// to handle truth status changes separately from row insertion/deletion.
+    /// Note: This requires access to the EGraph to modify truth status.
+    /// For now, this is a placeholder until the staging system supports truth operations.
     pub fn retract_fact(&self, _state: &mut ExecutionState, fact_ref: &FactRef) -> bool {
         if fact_ref.table_id != self.table {
             return false;
         }
 
-        // TODO: Implement truth status mutation staging 
-        // This would require a new type of staged operation for truth changes
+        // TODO: Implement truth status staging or direct access via EGraph
+        // This would be handled by the EGraph.retract_fact method
         false
     }
 }

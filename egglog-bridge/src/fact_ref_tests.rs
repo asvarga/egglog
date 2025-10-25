@@ -6,10 +6,9 @@ mod fact_ref_integration_tests {
 
     #[test]
     fn test_fact_ref_as_base_value() {
-        let mut egraph = EGraph::default();
+        let egraph = EGraph::default();
 
-        // Register FactRef as a base value type
-        let _fact_ref_ty = egraph.base_values_mut().register_type::<FactRef>();
+        // FactRef is now automatically registered as a base value type
 
         // Create a sample FactRef
         let table_id = TableId::from_usize(42);
@@ -27,10 +26,9 @@ mod fact_ref_integration_tests {
 
     #[test]
     fn test_fact_ref_constant_creation() {
-        let mut egraph = EGraph::default();
+        let egraph = EGraph::default();
 
-        // Register FactRef type first
-        let _fact_ref_ty = egraph.base_values_mut().register_type::<FactRef>();
+        // FactRef is now automatically registered as a base value type
 
         let table_id = TableId::from_usize(1);
         let fact_id = FactId::from_usize(456);

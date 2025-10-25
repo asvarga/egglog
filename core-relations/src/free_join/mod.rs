@@ -13,7 +13,7 @@ use rayon::prelude::*;
 use smallvec::SmallVec;
 
 use crate::{
-    BaseValues, ContainerValues, PoolSet, QueryEntry, TupleIndex, Value,
+    BaseValues, ContainerValues, FactId, FactRef, PoolSet, QueryEntry, TupleIndex, Value,
     action::{
         Bindings, DbView,
         mask::{Mask, MaskIter, ValueSource},
@@ -672,6 +672,73 @@ impl Database {
 
     pub(crate) fn plan_query(&mut self, query: Query) -> Plan {
         plan::plan_query(query)
+    }
+
+    /// Create a FactRef for a row in the specified table.
+    ///
+    /// Returns `None` if the key is not found in the table.
+    pub fn create_fact_ref(&self, table_id: TableId, key: &[Value]) -> Option<FactRef> {
+        let table = self.get_table(table_id);
+
+        if let Some(row) = table.get_row(key) {
+            // Check if this row already has a fact ID
+            if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
+                Some(FactRef { table_id, fact_id })
+            } else {
+                // For now, return None if no fact ID exists
+                // In a full implementation, we might assign one here
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Resolve a FactRef to its corresponding row data.
+    ///
+    /// Returns the row values if the fact reference is valid, None otherwise.
+    pub fn resolve_fact_ref(&self, fact_ref: &FactRef) -> Option<Vec<Value>> {
+        let table = self.get_table(fact_ref.table_id);
+
+        if let Some(row_id) = table.get_row_by_fact_id(fact_ref.fact_id) {
+            if let Some(row) = table.get_row_by_id(row_id) {
+                Some(row.vals.to_vec())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Check if a fact is currently asserted (not just referenced).
+    ///
+    /// Returns `None` if the fact reference is invalid.
+    pub fn is_fact_asserted(&self, fact_ref: &FactRef) -> Option<bool> {
+        let table = self.get_table(fact_ref.table_id);
+        table.is_fact_asserted(fact_ref.fact_id)
+    }
+
+    /// Mark a fact as asserted.
+    ///
+    /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
+    pub fn assert_fact(&mut self, fact_ref: &FactRef) -> bool {
+        let table = self.get_table_mut(fact_ref.table_id);
+        table.assert_fact(fact_ref.fact_id)
+    }
+
+    /// Mark a fact as retracted (no longer asserted).
+    ///
+    /// Returns `true` if the operation succeeded, `false` if the fact reference is invalid.
+    pub fn retract_fact(&mut self, fact_ref: &FactRef) -> bool {
+        let table = self.get_table_mut(fact_ref.table_id);
+        table.retract_fact(fact_ref.fact_id)
+    }
+
+    /// Validate that a FactRef points to an existing fact.
+    pub fn validate_fact_ref(&self, fact_ref: &FactRef) -> bool {
+        let table = self.get_table(fact_ref.table_id);
+        table.get_row_by_fact_id(fact_ref.fact_id).is_some()
     }
 }
 
