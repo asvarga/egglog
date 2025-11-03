@@ -815,17 +815,10 @@ impl Database {
     pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<FactRef> {
         let table = self.get_table_mut(table_id);
         
-        // First check if the fact already exists
-        if let Some(row) = table.get_row(key) {
-            if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
-                // Fact already exists, return it (regardless of assertion status)
-                return Some(FactRef { table_id, fact_id });
-            }
-        }
+        // Try to create or lookup the fact
+        let fact_id = table.create_or_lookup_unasserted_fact(key)?;
         
-        // For now, return None since we need to implement fact creation in tables
-        // This would require extending the table interface to create unasserted facts
-        None
+        Some(FactRef { table_id, fact_id })
     }
 
     /// Safe table access that returns an error instead of panicking

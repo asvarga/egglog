@@ -389,6 +389,18 @@ pub trait Table: Any + Send + Sync {
     fn enable_truth_tracking(&mut self) {
         // Default implementation: do nothing (for tables that don't support it)
     }
+
+    /// Create or lookup an unasserted fact reference for a given key.
+    ///
+    /// This method is used for first-class facts where we need to reference
+    /// propositions that may not (yet) be asserted as true. If the fact already
+    /// exists, returns its FactId. If not, creates a new row with fact tracking
+    /// but marks it as unasserted.
+    ///
+    /// Returns None if fact tracking is not enabled for this table.
+    fn create_or_lookup_unasserted_fact(&mut self, _key: &[Value]) -> Option<FactId> {
+        None // Default implementation: no fact tracking
+    }
 }
 
 /// A trait specifying a buffer of pending mutations for a [`Table`].

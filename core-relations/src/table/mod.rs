@@ -626,6 +626,14 @@ impl Table for SortedWritesTable {
     fn has_truth_status(&self, fact_id: FactId) -> bool {
         self.truth_enabled && self.fact_truth_status.contains_key(&fact_id)
     }
+
+    fn enable_truth_tracking(&mut self) {
+        self.truth_enabled = true;
+    }
+
+    fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
+        self.create_or_lookup_unasserted_fact(key)
+    }
 }
 
 impl SortedWritesTable {
@@ -669,11 +677,6 @@ impl SortedWritesTable {
             fact_truth_status: HashMap::default(),
             truth_enabled: false,
         }
-    }
-
-    /// Enable truth status tracking for modal logic support
-    pub fn enable_truth_tracking(&mut self) {
-        self.truth_enabled = true;
     }
 
     /// Flush all pending removals, in parallel.
@@ -1200,6 +1203,34 @@ impl SortedWritesTable {
         self.fact_truth_status.insert(fact_id, true);
 
         fact_id
+    }
+
+    /// Create or lookup an unasserted fact for the given key.
+    ///
+    /// This is used for first-class facts where we need to reference propositions.
+    /// If the key already exists in the table, returns its FactId (assigning one if needed).
+    /// If the key doesn't exist, returns None (facts must be asserted before being referenced).
+    pub fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
+        if !self.truth_enabled {
+            return None;
+        }
+
+        // Check if the row already exists
+        let row = self.get_row(key)?;
+
+        // Row exists, ensure it has a fact ID
+        if let Some(&fact_id) = self.fact_id_map.get(&row.id) {
+            Some(fact_id)
+        } else {
+            // Row exists but no fact ID yet, assign one
+            let fact_id = self.next_fact_id;
+            self.next_fact_id = self.next_fact_id.inc();
+            self.fact_id_map.insert(row.id, fact_id);
+            self.fact_lookup.insert(fact_id, row.id);
+            // Default to asserted since the row exists
+            self.fact_truth_status.insert(fact_id, true);
+            Some(fact_id)
+        }
     }
 
     /// Update fact ID mappings when row IDs change (e.g., during compaction)

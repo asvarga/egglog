@@ -311,13 +311,20 @@ impl Parser {
                     vec![Command::Relation {
                         span,
                         name: name.expect_atom("relation name")?,
-                        inputs: map_fallible(inputs.expect_list("input sorts")?, self, |_, sexp| {
-                            sexp.expect_atom("input sort")
-                        })?,
+                        inputs: map_fallible(
+                            inputs.expect_list("input sorts")?,
+                            self,
+                            |_, sexp| sexp.expect_atom("input sort"),
+                        )?,
                         fact_tracking,
                     }]
                 }
-                _ => return error!(span, "usage: (relation <name> (<input sort>*) [:fact-tracking])"),
+                _ => {
+                    return error!(
+                        span,
+                        "usage: (relation <name> (<input sort>*) [:fact-tracking])"
+                    );
+                }
             },
             "ruleset" => match tail {
                 [name] => vec![Command::AddRuleset(span, name.expect_atom("ruleset name")?)],

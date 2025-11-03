@@ -413,25 +413,12 @@ impl Default for EGraph {
                         if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
                             // Create and return the FactRef
                             let fact_ref = FactRef { table_id, fact_id };
+                            let base_values = exec_state.base_values();
                             return Some(base_values.get(fact_ref));
                         }
                     }
 
-                    // TODO: Support creating new unasserted facts
-                    //
-                    // Currently we can only return FactRefs for facts that already exist in the table
-                    // and already have fact IDs assigned. To fully support modal logic, we need to be
-                    // able to create unasserted facts on-demand.
-                    //
-                    // The architectural challenge is that fact ID allocation happens during table merge,
-                    // but we're executing during rule application (before merge). Possible solutions:
-                    //
-                    // 1. Add a "fact ID counter" similar to other counters, and allocate IDs eagerly
-                    // 2. Use predicted values mechanism to reserve fact IDs
-                    // 3. Stage fact creation and return a "promise" that resolves after merge
-                    //
-                    // For now, we return None if the fact doesn't exist yet.
-
+                    // Fact doesn't exist or doesn't have fact tracking enabled
                     None
                 }));
 
