@@ -212,6 +212,8 @@ pub struct EGraph {
     overall_run_report: RunReport,
     schedulers: DenseIdMap<SchedulerId, SchedulerRecord>,
     commands: IndexMap<String, Arc<dyn UserDefinedCommand>>,
+    /// Mapping from function names to TableIds for the fact-ref helper function
+    table_id_map: Option<std::sync::Arc<std::sync::Mutex<IndexMap<String, core_relations::TableId>>>>,
 }
 
 /// A user-defined command allows users to inject custom command that can be called
@@ -344,6 +346,7 @@ impl Default for EGraph {
             type_info: Default::default(),
             schedulers: Default::default(),
             commands: Default::default(),
+            table_id_map: None,
         };
 
         add_base_sort(&mut eg, UnitSort, span!()).unwrap();
@@ -365,11 +368,15 @@ impl Default for EGraph {
         // Register the primitive
         eg.add_primitive(fact_ref_primitive);
 
-        // Now register a helper external function that has access to the functions map
-        // This helper will be called by the primitive to create fact references
-        let functions_clone: std::sync::Arc<std::sync::Mutex<IndexMap<String, Function>>> =
+        // Now register a helper external function that has access to a mapping from
+        // function names to TableIds. This helper will be called by the primitive
+        // to create fact references.
+        // 
+        // We store a mapping of function names to TableIds (from core-relations)
+        // rather than storing the full Function objects.
+        let table_id_map: std::sync::Arc<std::sync::Mutex<IndexMap<String, core_relations::TableId>>> =
             std::sync::Arc::new(std::sync::Mutex::new(IndexMap::default()));
-        let functions_ref = functions_clone.clone();
+        let table_id_map_ref = table_id_map.clone();
 
         let helper_func_id =
             eg.backend
@@ -389,33 +396,39 @@ impl Default for EGraph {
                         base_values.unwrap(relation_name_value);
                     let relation_name_str: &str = boxed_str.as_ref().as_ref();
 
-                    // Look up the function/relation to get its backend table ID
-                    let functions = functions_ref.lock().unwrap();
-                    let func = functions.get(relation_name_str)?;
-                    let _table_id = func.backend_id;
-                    drop(functions); // Release lock
+                    // Look up the table ID from our mapping
+                    let table_ids = table_id_map_ref.lock().unwrap();
+                    let table_id = *table_ids.get(relation_name_str)?;
+                    drop(table_ids); // Release lock
 
                     // Remaining arguments are the tuple key
-                    let _key = &args[1..];
+                    let key = &args[1..];
 
-                    // TODO: Create the fact reference by calling Database::create_unasserted_fact_ref
+                    // Try to look up the row in the table
+                    let table = exec_state.get_table(table_id);
+                    if let Some(row) = table.get_row(key) {
+                        // Check if this row has a fact ID
+                        if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
+                            // Create and return the FactRef
+                            let fact_ref = FactRef { table_id, fact_id };
+                            return Some(base_values.get(fact_ref));
+                        }
+                    }
+
+                    // TODO: Support creating new unasserted facts
                     //
-                    // The core issue is architectural: ExecutionState (from core-relations) doesn't
-                    // expose the create_unasserted_fact_ref method that exists on Database. We need
-                    // to bridge this gap somehow.
+                    // Currently we can only return FactRefs for facts that already exist in the table
+                    // and already have fact IDs assigned. To fully support modal logic, we need to be
+                    // able to create unasserted facts on-demand.
                     //
-                    // Current status: Database::create_unasserted_fact_ref (in free_join/mod.rs line 815)
-                    // exists but returns None as a placeholder - it needs to be fully implemented to:
-                    //   1. Look up or create the row for the given key in the table
-                    //   2. Assign a stable FactId to that row (if it doesn't have one)
-                    //   3. Mark the fact as "referenced" but not "asserted"
-                    //   4. Return the FactRef { table_id, fact_id }
+                    // The architectural challenge is that fact ID allocation happens during table merge,
+                    // but we're executing during rule application (before merge). Possible solutions:
                     //
-                    // Once Database::create_unasserted_fact_ref is implemented, we need to:
-                    //   A. Either add a method to ExecutionState that delegates to it, OR
-                    //   B. Store a shared reference to the EGraph backend in this closure
+                    // 1. Add a "fact ID counter" similar to other counters, and allocate IDs eagerly
+                    // 2. Use predicted values mechanism to reserve fact IDs
+                    // 3. Stage fact creation and return a "promise" that resolves after merge
                     //
-                    // For now, returning None as a placeholder.
+                    // For now, we return None if the fact doesn't exist yet.
 
                     None
                 }));
@@ -423,9 +436,10 @@ impl Default for EGraph {
         // Set the helper function ID in the primitive
         fact_ref_helper.set_helper_func(helper_func_id);
 
-        // Store the functions reference so the helper can access it
-        // Note: We'll need to update this when functions are added
-        *functions_clone.lock().unwrap() = eg.functions.clone();
+        // Store the table_id_map so the helper can access it
+        // Note: We'll need to populate/update this mapping when functions are added
+        // For now it's empty, we'll update it in declare_function
+        eg.table_id_map = Some(table_id_map);
 
         eg.type_info.add_presort::<MapSort>(span!()).unwrap();
         eg.type_info.add_presort::<SetSort>(span!()).unwrap();
@@ -627,6 +641,12 @@ impl EGraph {
                 "Typechecking should have caught function already bound: {}",
                 decl.name
             );
+        }
+
+        // Update the table_id_map for the fact-ref helper function
+        if let Some(table_id_map) = &self.table_id_map {
+            let table_id = self.backend.get_table_id(backend_id);
+            table_id_map.lock().unwrap().insert(decl.name.clone(), table_id);
         }
 
         Ok(())

@@ -716,6 +716,12 @@ impl EGraph {
         self.db.get_table(self.funcs[table].table).len()
     }
 
+    /// Get the underlying TableId for a given FunctionId.
+    /// This is useful for accessing core-relations APIs that work with TableIds.
+    pub fn get_table_id(&self, func: FunctionId) -> TableId {
+        self.funcs[func].table
+    }
+
     /// Generate a proof explaining why a given term is in the database.
     ///
     /// # Errors
