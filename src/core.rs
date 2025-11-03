@@ -80,6 +80,27 @@ impl ResolvedCall {
     }
 
     pub fn from_resolution(head: &str, types: &[ArcSort], typeinfo: &TypeInfo) -> ResolvedCall {
+        // Special handling for fact-ref - look it up from registered primitives
+        if head == "fact-ref" {
+            // fact-ref should have been registered as a primitive during EGraph initialization
+            if let Some(primitives) = typeinfo.get_prims(head) {
+                // There should be exactly one fact-ref primitive registered
+                assert_eq!(
+                    primitives.len(),
+                    1,
+                    "Expected exactly one fact-ref primitive"
+                );
+                let (out, inp) = types.split_last().unwrap();
+                return ResolvedCall::Primitive(SpecializedPrimitive {
+                    primitive: primitives[0].clone(),
+                    input: inp.to_vec(),
+                    output: out.clone(),
+                });
+            } else {
+                panic!("fact-ref primitive not registered");
+            }
+        }
+
         let mut resolved_call = Vec::with_capacity(1);
         if let Some(ty) = typeinfo.get_func_type(head) {
             let expected = ty.input.iter().chain(once(&ty.output)).map(|s| s.name());

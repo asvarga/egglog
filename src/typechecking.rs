@@ -52,7 +52,7 @@ impl Debug for PrimitiveWithId {
 pub struct TypeInfo {
     mksorts: HashMap<String, MkSort>,
     // TODO(yz): I want to get rid of this as now we have user-defined primitives and constraint based type checking
-    reserved_primitives: HashSet<&'static str>,
+    pub(crate) reserved_primitives: HashSet<&'static str>,
     sorts: HashMap<String, Arc<dyn Sort>>,
     primitives: HashMap<String, Vec<PrimitiveWithId>>,
     func_types: HashMap<String, FuncType>,

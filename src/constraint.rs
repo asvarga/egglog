@@ -874,6 +874,79 @@ fn get_atom_application_constraints(
     span: &Span,
     type_info: &TypeInfo,
 ) -> Result<Vec<Box<dyn Constraint<AtomTerm, ArcSort>>>, TypeError> {
+    // Special handling for fact-ref: (fact-ref "RelationName" arg1 arg2 ...)
+    // The first argument must be a string literal with the relation name
+    // Subsequent arguments must match the relation's input types
+    // The output is always FactRef sort
+    if head == "fact-ref" {
+        if args.is_empty() {
+            return Ok(vec![constraint::impossible(
+                ImpossibleConstraint::ArityMismatch {
+                    atom: Atom {
+                        span: span.clone(),
+                        head: head.to_owned(),
+                        args: args.to_vec(),
+                    },
+                    expected: 2, // At least relation name + output
+                },
+            )]);
+        }
+        
+        // First argument should be a string literal containing the relation name
+        let relation_name = match &args[0] {
+            AtomTerm::Literal(_, Literal::String(name)) => name,
+            _ => {
+                return Ok(vec![constraint::impossible(
+                    ImpossibleConstraint::ArityMismatch {
+                        atom: Atom {
+                            span: span.clone(),
+                            head: head.to_owned(),
+                            args: args.to_vec(),
+                        },
+                        expected: args.len(),
+                    },
+                )]);
+            }
+        };
+        
+        // Look up the relation's type
+        let func_type = type_info.get_func_type(relation_name).ok_or_else(|| {
+            TypeError::UnboundFunction(relation_name.clone(), span.clone())
+        })?;
+        
+        // Args should be: [relation_name_literal, arg1, arg2, ..., argN, output_var]
+        // We need N+2 args total (relation name + N inputs + 1 output)
+        let expected_len = func_type.input.len() + 2;
+        if args.len() != expected_len {
+            return Ok(vec![constraint::impossible(
+                ImpossibleConstraint::ArityMismatch {
+                    atom: Atom {
+                        span: span.clone(),
+                        head: head.to_owned(),
+                        args: args.to_vec(),
+                    },
+                    expected: expected_len,
+                },
+            )]);
+        }
+        
+        // Create constraints: input args match relation inputs, output is FactRef
+        let mut constraints: Vec<Box<dyn Constraint<AtomTerm, ArcSort>>> = vec![];
+        
+        // Constrain relation input arguments (skip first arg which is the string literal)
+        for (i, input_sort) in func_type.input.iter().enumerate() {
+            constraints.push(constraint::assign(args[i + 1].clone(), input_sort.clone()));
+        }
+        
+        // Constrain output to be FactRef
+        let fact_ref_sort = type_info.get_sort_by_name("FactRef")
+            .ok_or_else(|| TypeError::UndefinedSort("FactRef".to_string(), span.clone()))?
+            .clone();
+        constraints.push(constraint::assign(args[expected_len - 1].clone(), fact_ref_sort));
+        
+        return Ok(constraints);
+    }
+    
     // An atom can have potentially different semantics due to polymorphism
     // e.g. (set-empty) can mean any empty set with some element type.
     // To handle this, we collect each possible instantiations of an atom

@@ -279,6 +279,61 @@ impl Debug for Function {
     }
 }
 
+/// Special primitive for creating fact references
+/// Syntax: (fact-ref "RelationName" arg1 arg2 ... argN)
+/// Creates or retrieves a FactRef for the given tuple in the specified relation
+#[derive(Clone)]
+pub struct FactRefPrimitive;
+
+impl Primitive for FactRefPrimitive {
+    fn name(&self) -> &str {
+        "fact-ref"
+    }
+
+    fn get_type_constraints(&self, _span: &Span) -> Box<dyn TypeConstraint> {
+        // The type constraints are handled specially in constraint.rs
+        // This should never actually be called since we handle fact-ref specially
+        panic!(
+            "FactRefPrimitive::get_type_constraints should not be called - fact-ref is handled specially in constraint solving"
+        );
+    }
+
+    fn apply(&self, exec_state: &mut ExecutionState, args: &[Value]) -> Option<Value> {
+        // Args: [relation_name_string, arg1, arg2, ..., argN]
+        // We need to:
+        // 1. Extract the relation name from the first string argument
+        // 2. Look up the relation's table ID
+        // 3. Call create_fact_ref with the table ID and the remaining arguments
+
+        if args.is_empty() {
+            return None;
+        }
+
+        // First argument should be the relation name as a string
+        // Extract the string from the Value
+        let relation_name_value = args[0];
+
+        // Get the string sort and extract the string data
+        let string_sort = exec_state.get_sort(&relation_name_value).ok()?;
+        if string_sort.name() != "String" {
+            return None;
+        }
+
+        // Extract string from the value - we need to access the backend
+        // The string is stored as a unique ID in the backend
+        let relation_name = exec_state.get_string_by_value(relation_name_value)?;
+
+        // Look up the function/relation in the backend
+        let table_id = exec_state.get_table_id(&relation_name)?;
+
+        // Remaining arguments are the tuple key
+        let key = &args[1..];
+
+        // Create or retrieve the fact reference
+        exec_state.create_fact_ref(table_id, key)
+    }
+}
+
 impl Default for EGraph {
     fn default() -> Self {
         let mut eg = Self {
@@ -304,6 +359,13 @@ impl Default for EGraph {
         add_base_sort(&mut eg, BigIntSort, span!()).unwrap();
         add_base_sort(&mut eg, BigRatSort, span!()).unwrap();
         add_base_sort(&mut eg, FactRefSort, span!()).unwrap();
+
+        // Reserve "fact-ref" as a special primitive for creating fact references
+        eg.type_info.reserved_primitives.insert("fact-ref");
+
+        // Register the fact-ref primitive (but it will still be handled specially during type checking)
+        eg.add_primitive(FactRefPrimitive);
+
         eg.type_info.add_presort::<MapSort>(span!()).unwrap();
         eg.type_info.add_presort::<SetSort>(span!()).unwrap();
         eg.type_info.add_presort::<VecSort>(span!()).unwrap();
@@ -325,6 +387,33 @@ impl Default for EGraph {
 
         eg.rulesets
             .insert("".into(), Ruleset::Rules(Default::default()));
+
+        // Add the `fact` expression macro for creating fact references
+        eg.parser
+            .add_expr_macro(Arc::new(SimpleMacro::new("fact", |args, span, parser| {
+                if args.is_empty() {
+                    return Err(ParseError(
+                        span,
+                        "fact requires a relation name and arguments".to_string(),
+                    ));
+                }
+
+                // First argument must be the relation name (an atom)
+                let relation_name = args[0].expect_atom("relation name in fact expression")?;
+
+                // Parse the remaining arguments as expressions
+                let mut fact_args = Vec::new();
+                for arg in &args[1..] {
+                    fact_args.push(parser.parse_expr(arg)?);
+                }
+
+                // Return a Call expression: (fact-ref relation_name arg1 arg2 ...)
+                // We use "fact-ref" as an internal marker that will be handled during typechecking
+                let mut all_args = vec![Expr::Lit(span.clone(), Literal::String(relation_name))];
+                all_args.extend(fact_args);
+
+                Ok(Expr::Call(span, "fact-ref".to_string(), all_args))
+            })));
 
         eg
     }
