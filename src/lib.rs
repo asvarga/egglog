@@ -390,11 +390,11 @@ impl Default for EGraph {
                     let relation_name_value = args[0];
 
                     // Get the string from base values
-                    // Strings are stored as Boxed<Arc<str>> in egglog
+                    // Strings are stored as Boxed<String> in egglog (see sort::S)
                     let base_values = exec_state.base_values();
-                    let boxed_str: core_relations::Boxed<Arc<str>> =
+                    let boxed_string: core_relations::Boxed<String> =
                         base_values.unwrap(relation_name_value);
-                    let relation_name_str: &str = boxed_str.as_ref().as_ref();
+                    let relation_name_str: &str = boxed_string.deref();
 
                     // Look up the table ID from our mapping
                     let table_ids = table_id_map_ref.lock().unwrap();
