@@ -297,7 +297,7 @@ impl FactRefPrimitive {
             helper_func_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
         }
     }
-    
+
     fn set_helper_func(&self, func_id: ExternalFunctionId) {
         *self.helper_func_id.lock().unwrap() = Some(func_id);
     }
@@ -318,10 +318,12 @@ impl Primitive for FactRefPrimitive {
 
     fn apply(&self, exec_state: &mut ExecutionState, args: &[Value]) -> Option<Value> {
         // Get the helper function ID
-        let helper_id = self.helper_func_id.lock().unwrap().expect(
-            "FactRefPrimitive helper function not initialized"
-        );
-        
+        let helper_id = self
+            .helper_func_id
+            .lock()
+            .unwrap()
+            .expect("FactRefPrimitive helper function not initialized");
+
         // Delegate to the helper function which has access to EGraph internals
         exec_state.call_external_func(helper_id, args)
     }
@@ -359,67 +361,68 @@ impl Default for EGraph {
         // Create the FactRefPrimitive
         let fact_ref_primitive = FactRefPrimitive::new();
         let fact_ref_helper = fact_ref_primitive.clone();
-        
+
         // Register the primitive
         eg.add_primitive(fact_ref_primitive);
-        
+
         // Now register a helper external function that has access to the functions map
         // This helper will be called by the primitive to create fact references
-        let functions_clone: std::sync::Arc<std::sync::Mutex<IndexMap<String, Function>>> = 
+        let functions_clone: std::sync::Arc<std::sync::Mutex<IndexMap<String, Function>>> =
             std::sync::Arc::new(std::sync::Mutex::new(IndexMap::default()));
         let functions_ref = functions_clone.clone();
-        
-        let helper_func_id = eg.backend.register_external_func(make_external_func(
-            move |exec_state, args| {
-                // Args: [relation_name_string, arg1, arg2, ..., argN]
-                if args.is_empty() {
-                    return None;
-                }
-                
-                // Extract the relation name from the first argument (a String value)
-                let relation_name_value = args[0];
-                
-                // Get the string from base values  
-                // Strings are stored as Boxed<Arc<str>> in egglog
-                let base_values = exec_state.base_values();
-                let boxed_str: core_relations::Boxed<Arc<str>> = base_values.unwrap(relation_name_value);
-                let relation_name_str: &str = boxed_str.as_ref().as_ref();
-                
-                // Look up the function/relation to get its backend table ID
-                let functions = functions_ref.lock().unwrap();
-                let func = functions.get(relation_name_str)?;
-                let _table_id = func.backend_id;
-                drop(functions); // Release lock
-                
-                // Remaining arguments are the tuple key
-                let _key = &args[1..];
-                
-                // TODO: Create the fact reference by calling Database::create_unasserted_fact_ref
-                //
-                // The core issue is architectural: ExecutionState (from core-relations) doesn't
-                // expose the create_unasserted_fact_ref method that exists on Database. We need
-                // to bridge this gap somehow.
-                //
-                // Current status: Database::create_unasserted_fact_ref (in free_join/mod.rs line 815)
-                // exists but returns None as a placeholder - it needs to be fully implemented to:
-                //   1. Look up or create the row for the given key in the table
-                //   2. Assign a stable FactId to that row (if it doesn't have one)
-                //   3. Mark the fact as "referenced" but not "asserted" 
-                //   4. Return the FactRef { table_id, fact_id }
-                //
-                // Once Database::create_unasserted_fact_ref is implemented, we need to:
-                //   A. Either add a method to ExecutionState that delegates to it, OR
-                //   B. Store a shared reference to the EGraph backend in this closure
-                //
-                // For now, returning None as a placeholder.
-                
-                None
-            }
-        ));
-        
+
+        let helper_func_id =
+            eg.backend
+                .register_external_func(make_external_func(move |exec_state, args| {
+                    // Args: [relation_name_string, arg1, arg2, ..., argN]
+                    if args.is_empty() {
+                        return None;
+                    }
+
+                    // Extract the relation name from the first argument (a String value)
+                    let relation_name_value = args[0];
+
+                    // Get the string from base values
+                    // Strings are stored as Boxed<Arc<str>> in egglog
+                    let base_values = exec_state.base_values();
+                    let boxed_str: core_relations::Boxed<Arc<str>> =
+                        base_values.unwrap(relation_name_value);
+                    let relation_name_str: &str = boxed_str.as_ref().as_ref();
+
+                    // Look up the function/relation to get its backend table ID
+                    let functions = functions_ref.lock().unwrap();
+                    let func = functions.get(relation_name_str)?;
+                    let _table_id = func.backend_id;
+                    drop(functions); // Release lock
+
+                    // Remaining arguments are the tuple key
+                    let _key = &args[1..];
+
+                    // TODO: Create the fact reference by calling Database::create_unasserted_fact_ref
+                    //
+                    // The core issue is architectural: ExecutionState (from core-relations) doesn't
+                    // expose the create_unasserted_fact_ref method that exists on Database. We need
+                    // to bridge this gap somehow.
+                    //
+                    // Current status: Database::create_unasserted_fact_ref (in free_join/mod.rs line 815)
+                    // exists but returns None as a placeholder - it needs to be fully implemented to:
+                    //   1. Look up or create the row for the given key in the table
+                    //   2. Assign a stable FactId to that row (if it doesn't have one)
+                    //   3. Mark the fact as "referenced" but not "asserted"
+                    //   4. Return the FactRef { table_id, fact_id }
+                    //
+                    // Once Database::create_unasserted_fact_ref is implemented, we need to:
+                    //   A. Either add a method to ExecutionState that delegates to it, OR
+                    //   B. Store a shared reference to the EGraph backend in this closure
+                    //
+                    // For now, returning None as a placeholder.
+
+                    None
+                }));
+
         // Set the helper function ID in the primitive
         fact_ref_helper.set_helper_func(helper_func_id);
-        
+
         // Store the functions reference so the helper can access it
         // Note: We'll need to update this when functions are added
         *functions_clone.lock().unwrap() = eg.functions.clone();
