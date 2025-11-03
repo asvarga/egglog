@@ -105,6 +105,7 @@ impl GlobalRemover<'_> {
                         unextractable: true,
                         let_binding: true,
                         span: span.clone(),
+                        fact_tracking: false,
                     };
                     let resolved_call = ResolvedCall::Func(FuncType {
                         name: name.name,

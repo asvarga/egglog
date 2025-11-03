@@ -301,14 +301,23 @@ impl Parser {
                 }
             },
             "relation" => match tail {
-                [name, inputs] => vec![Command::Relation {
-                    span,
-                    name: name.expect_atom("relation name")?,
-                    inputs: map_fallible(inputs.expect_list("input sorts")?, self, |_, sexp| {
-                        sexp.expect_atom("input sort")
-                    })?,
-                }],
-                _ => return error!(span, "usage: (relation <name> (<input sort>*))"),
+                [name, inputs, rest @ ..] => {
+                    let mut fact_tracking = false;
+                    match self.parse_options(rest)?.as_slice() {
+                        [] => {}
+                        [(":fact-tracking", [])] => fact_tracking = true,
+                        _ => return error!(span, "could not parse relation options"),
+                    }
+                    vec![Command::Relation {
+                        span,
+                        name: name.expect_atom("relation name")?,
+                        inputs: map_fallible(inputs.expect_list("input sorts")?, self, |_, sexp| {
+                            sexp.expect_atom("input sort")
+                        })?,
+                        fact_tracking,
+                    }]
+                }
+                _ => return error!(span, "usage: (relation <name> (<input sort>*) [:fact-tracking])"),
             },
             "ruleset" => match tail {
                 [name] => vec![Command::AddRuleset(span, name.expect_atom("ruleset name")?)],

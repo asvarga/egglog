@@ -48,9 +48,11 @@ pub(crate) fn desugar_command(
             cost,
             unextractable,
         ))],
-        Command::Relation { span, name, inputs } => vec![NCommand::Function(
-            FunctionDecl::relation(span, name, inputs),
-        )],
+        Command::Relation { span, name, inputs, fact_tracking } => {
+            let mut decl = FunctionDecl::relation(span, name, inputs);
+            decl.fact_tracking = fact_tracking;
+            vec![NCommand::Function(decl)]
+        }
         Command::Datatype {
             span,
             name,

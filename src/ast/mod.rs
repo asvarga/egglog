@@ -110,6 +110,7 @@ where
                     span: f.span.clone(),
                     name: f.name.clone(),
                     inputs: f.schema.input.clone(),
+                    fact_tracking: f.fact_tracking,
                 },
                 FunctionSubtype::Custom => GenericCommand::Function {
                     span: f.span.clone(),
@@ -393,6 +394,7 @@ where
         span: Span,
         name: String,
         inputs: Vec<String>,
+        fact_tracking: bool,
     },
 
     /// The `function` command declare an egglog custom function, which is a database table with a
@@ -718,8 +720,13 @@ where
                 span: _,
                 name,
                 inputs,
+                fact_tracking,
             } => {
-                write!(f, "(relation {name} ({}))", ListDisplay(inputs, " "))
+                write!(f, "(relation {name} ({})", ListDisplay(inputs, " "))?;
+                if *fact_tracking {
+                    write!(f, " :fact-tracking")?;
+                }
+                write!(f, ")")
             }
             GenericCommand::AddRuleset(_span, name) => write!(f, "(ruleset {name})"),
             GenericCommand::UnstableCombinedRuleset(_span, name, others) => {
@@ -883,6 +890,9 @@ where
     /// Globals are desugared to functions, with this flag set to true.
     /// This is used by visualization to handle globals differently.
     pub let_binding: bool,
+    /// Enable fact tracking for first-class facts support.
+    /// When true, the table will track fact IDs for modal logic operations.
+    pub fact_tracking: bool,
     pub span: Span,
 }
 
@@ -942,6 +952,7 @@ impl FunctionDecl {
             cost: None,
             unextractable: true,
             let_binding: false,
+            fact_tracking: false,
             span,
         }
     }
@@ -963,6 +974,7 @@ impl FunctionDecl {
             unextractable,
             let_binding: false,
             span,
+            fact_tracking: false,
         }
     }
 
@@ -980,6 +992,7 @@ impl FunctionDecl {
             unextractable: true,
             let_binding: false,
             span,
+            fact_tracking: false,
         }
     }
 }
@@ -1002,6 +1015,7 @@ where
             unextractable: self.unextractable,
             let_binding: self.let_binding,
             span: self.span,
+            fact_tracking: self.fact_tracking,
         }
     }
 }

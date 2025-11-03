@@ -937,6 +937,17 @@ impl EGraph {
         res
     }
 
+    /// Enable truth tracking on a table for first-class facts.
+    ///
+    /// This allocates a FactId for each unique key when it's first inserted,
+    /// allowing facts to be referenced and reasoned about independently of
+    /// their truth status.
+    pub fn enable_truth_tracking(&mut self, func_id: FunctionId) {
+        let table_id = self.funcs[func_id].table;
+        let table = self.db.get_table_mut(table_id);
+        table.enable_truth_tracking();
+    }
+
     /// Run the given rules, returning whether the database changed.
     ///
     /// If the given rules are malformed, this method can return an error.

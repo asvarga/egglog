@@ -383,6 +383,12 @@ pub trait Table: Any + Send + Sync {
     fn has_truth_status(&self, _fact_id: FactId) -> bool {
         false // Default implementation: no truth status
     }
+
+    /// Enable truth tracking for this table (must be called before first insert).
+    /// This allows facts to be tracked and queried independently of their truth status.
+    fn enable_truth_tracking(&mut self) {
+        // Default implementation: do nothing (for tables that don't support it)
+    }
 }
 
 /// A trait specifying a buffer of pending mutations for a [`Table`].

@@ -412,6 +412,7 @@ impl TypeInfo {
             unextractable: fdecl.unextractable,
             let_binding: fdecl.let_binding,
             span: fdecl.span.clone(),
+            fact_tracking: fdecl.fact_tracking,
         })
     }
 

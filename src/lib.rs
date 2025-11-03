@@ -213,7 +213,8 @@ pub struct EGraph {
     schedulers: DenseIdMap<SchedulerId, SchedulerRecord>,
     commands: IndexMap<String, Arc<dyn UserDefinedCommand>>,
     /// Mapping from function names to TableIds for the fact-ref helper function
-    table_id_map: Option<std::sync::Arc<std::sync::Mutex<IndexMap<String, core_relations::TableId>>>>,
+    table_id_map:
+        Option<std::sync::Arc<std::sync::Mutex<IndexMap<String, core_relations::TableId>>>>,
 }
 
 /// A user-defined command allows users to inject custom command that can be called
@@ -371,11 +372,12 @@ impl Default for EGraph {
         // Now register a helper external function that has access to a mapping from
         // function names to TableIds. This helper will be called by the primitive
         // to create fact references.
-        // 
+        //
         // We store a mapping of function names to TableIds (from core-relations)
         // rather than storing the full Function objects.
-        let table_id_map: std::sync::Arc<std::sync::Mutex<IndexMap<String, core_relations::TableId>>> =
-            std::sync::Arc::new(std::sync::Mutex::new(IndexMap::default()));
+        let table_id_map: std::sync::Arc<
+            std::sync::Mutex<IndexMap<String, core_relations::TableId>>,
+        > = std::sync::Arc::new(std::sync::Mutex::new(IndexMap::default()));
         let table_id_map_ref = table_id_map.clone();
 
         let helper_func_id =
@@ -646,7 +648,15 @@ impl EGraph {
         // Update the table_id_map for the fact-ref helper function
         if let Some(table_id_map) = &self.table_id_map {
             let table_id = self.backend.get_table_id(backend_id);
-            table_id_map.lock().unwrap().insert(decl.name.clone(), table_id);
+            table_id_map
+                .lock()
+                .unwrap()
+                .insert(decl.name.clone(), table_id);
+        }
+
+        // Enable truth tracking if requested
+        if decl.fact_tracking {
+            self.backend.enable_truth_tracking(backend_id);
         }
 
         Ok(())

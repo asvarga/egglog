@@ -680,6 +680,7 @@ pub fn add_relation(
         span: span!(),
         name: name.to_owned(),
         inputs,
+        fact_tracking: false,
     }])
 }
 
