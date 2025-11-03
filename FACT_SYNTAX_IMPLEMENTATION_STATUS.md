@@ -57,18 +57,21 @@
 
 ## ⚠️ Current Limitations
 
-### 1. Fact Tracking Must Be Enabled
+### 1. Fact Tracking Must Be Enabled ✅ SOLVED
 **Problem**: Regular relations don't have fact tracking enabled by default.
 
-**Impact**: The helper function returns None because:
-- `table.get_fact_id_for_row(row_id)` returns None
-- Tables created via `(relation ...)` have `truth_enabled = false`
-- Need `enable_truth_tracking()` called on table
+**Solution Implemented**: Added `:fact-tracking` flag to relation declarations
+- Syntax: `(relation Edge (i64 i64) :fact-tracking)`
+- Parsed in `src/ast/parse.rs`
+- Wired through type checking and resolution
+- Calls `enable_truth_tracking()` during `declare_function`
+- Tested and working in `test_fact_tracking_enabled.egg`
 
-**Solutions**:
-- [ ] Add egglog syntax: `(relation Edge (i64 i64) :fact-tracking)`
-- [ ] Enable fact tracking by default for all relations
-- [ ] Add command: `(enable-fact-tracking Edge)`
+**Implementation Details**:
+- Added `fact_tracking: bool` field to `GenericFunctionDecl` and `Command::Relation`
+- Added `enable_truth_tracking()` to `Table` trait with default no-op impl
+- Added `enable_truth_tracking()` method to `EGraph` in egglog-bridge
+- Properly threaded through all AST transformations
 
 ### 2. Cannot Create New Unasserted Facts
 **Problem**: Architectural constraint - fact IDs are allocated during table merge, but we're executing during rule application.
@@ -144,11 +147,11 @@ The method exists but currently returns None. It needs to:
 ## 🧪 Testing Strategy
 
 ### Unit Tests Needed
-- [ ] Parser: `(fact Edge 1 2)` transforms correctly
-- [ ] Type checking: Validates relation schema
-- [ ] Type checking: Error on unknown relation
-- [ ] Type checking: Error on wrong argument types
-- [ ] Fact lookup: Works with tracking enabled
+- [x] Parser: `(fact Edge 1 2)` transforms correctly
+- [x] Type checking: Validates relation schema
+- [x] Type checking: Error on unknown relation
+- [x] Type checking: Error on wrong argument types
+- [x] Fact lookup: Works with tracking enabled (when fact exists)
 - [ ] Fact creation: Creates unasserted facts
 
 ### Integration Tests Needed  
@@ -165,8 +168,8 @@ The method exists but currently returns None. It needs to:
 ## 🎯 Next Steps
 
 **Immediate** (to unblock further work):
-1. Implement `:fact-tracking` flag for relations
-2. Test current lookup implementation with tracking enabled
+1. ~~Implement `:fact-tracking` flag for relations~~ ✅ DONE
+2. ~~Test current lookup implementation with tracking enabled~~ ✅ DONE
 
 **Short term** (for basic functionality):
 3. Implement eager fact ID allocation
@@ -185,15 +188,15 @@ The method exists but currently returns None. It needs to:
 | Core Resolution | ✅ 100% | Complete |
 | Primitive Registration | ✅ 100% | Complete |
 | Helper Function | ⚠️ 60% | Lookup works, creation TODO |
-| Fact Tracking | ❌ 0% | Needs egglog syntax |
+| Fact Tracking | ✅ 100% | `:fact-tracking` flag implemented |
 | Fact Creation | ❌ 0% | Architectural work needed |
 | Modal Operations | ❌ 0% | Depends on above |
-| Documentation | ⚠️ 20% | Status doc only |
-| Tests | ⚠️ 10% | Test file created |
+| Documentation | ⚠️ 30% | Status doc & examples |
+| Tests | ⚠️ 20% | Basic tests created |
 
-**Overall Progress**: ~50% complete
+**Overall Progress**: ~60% complete
 
 The foundation is solid. The remaining work is primarily about:
-1. Enabling fact tracking (small, targeted addition)
+1. ~~Enabling fact tracking (small, targeted addition)~~ ✅ DONE
 2. Implementing fact creation (medium complexity, architectural decision needed)
 3. Adding modal logic operations (straightforward once creation works)
