@@ -73,6 +73,7 @@ pub struct EGraph {
     id_counter: CounterId,
     reason_counter: CounterId,
     timestamp_counter: CounterId,
+    fact_id_counter: CounterId, // Global counter for allocating fact IDs
     rules: DenseIdMapWithReuse<RuleId, RuleInfo>,
     funcs: DenseIdMap<FunctionId, FunctionInfo>,
     panic_message: SideChannel<String>,
@@ -186,6 +187,7 @@ impl EGraph {
         let id_counter = db.add_counter();
         let trace_counter = db.add_counter();
         let ts_counter = db.add_counter();
+        let fact_id_counter = db.add_counter(); // Global fact ID counter
         // Start the timestamp counter at 1.
         db.inc_counter(ts_counter);
         let mut proof_specs = IdVec::default();
@@ -202,6 +204,7 @@ impl EGraph {
             id_counter,
             reason_counter: trace_counter,
             timestamp_counter: ts_counter,
+            fact_id_counter, // Add the fact ID counter
             rules: Default::default(),
             funcs: Default::default(),
             panic_message: Default::default(),

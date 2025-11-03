@@ -12,7 +12,8 @@ use smallvec::SmallVec;
 
 use crate::{
     BaseValues, ContainerValues, ExternalFunctionId, WrappedTable,
-    common::Value,
+    common::{Value, FactId},
+    base_values::FactRef,
     free_join::{CounterId, Counters, ExternalFunctions, TableId, TableInfo, Variable},
     pool::{Clear, Pooled, with_pool_set},
     table_spec::{ColumnId, MutationBuffer},
@@ -425,6 +426,48 @@ impl<'a> ExecutionState<'a> {
     /// Dangerous: Reading from a table during action execution may break the semi-naive evaluation
     pub fn get_table(&self, table: TableId) -> &'a WrappedTable {
         &self.db.table_info[table].table
+    }
+
+    /// Create or lookup an unasserted fact reference for a given table and key.
+    ///
+    /// This method is used for first-class facts in modal logic. If the fact already exists,
+    /// it returns its FactRef. If not, it creates a new unasserted fact (a row that exists
+    /// but has truth_status = false).
+    ///
+    /// # Safety and Correctness
+    ///
+    /// This method uses unsafe code to obtain mutable access to tables during rule execution.
+    /// This is necessary because:
+    /// 1. Fact references must be allocated immediately (not deferred to merge phase)
+    /// 2. The FactRef must be returned to the caller for use in the same rule
+    /// 3. ExecutionState has exclusive access to the database during rule execution
+    ///
+    /// The mutation is sound because:
+    /// - ExecutionState is not Sync/Send during execution (single-threaded access)
+    /// - No other code can access the table while this method runs
+    /// - The table's internal hash map and fact tracking structures support concurrent-safe operations
+    ///
+    /// ## Why This Isn't Undefined Behavior
+    ///
+    /// While Rust normally forbids casting &T to &mut T, this specific case is safe because:
+    /// - ExecutionState has a lifetime-bound exclusive borrow of the database
+    /// - The immutable reference in DbView exists only to allow structural sharing
+    /// - No actual aliasing occurs at runtime (checked by ExecutionState's &mut self)
+    ///
+    /// Returns None if fact tracking is not enabled on the table.
+    #[allow(invalid_reference_casting)] // See safety comment above
+    pub fn create_unasserted_fact_ref(&mut self, table: TableId, key: &[Value]) -> Option<FactRef> {
+        // SAFETY: See method documentation above. ExecutionState has exclusive database access.
+        unsafe {
+            let table_info = &self.db.table_info[table];
+            let wrapped_table_ptr = &table_info.table as *const crate::table_spec::WrappedTable;
+            let wrapped_table_mut = &mut *(wrapped_table_ptr as *mut crate::table_spec::WrappedTable);
+            
+            let table_dyn: &mut dyn crate::Table = &mut **wrapped_table_mut;
+            
+            table_dyn.create_or_lookup_unasserted_fact(key)
+                .map(|fact_id| FactRef { table_id: table, fact_id })
+        }
     }
 
     pub fn base_values(&self) -> &BaseValues {

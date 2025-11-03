@@ -1209,26 +1209,84 @@ impl SortedWritesTable {
     ///
     /// This is used for first-class facts where we need to reference propositions.
     /// If the key already exists in the table, returns its FactId (assigning one if needed).
-    /// If the key doesn't exist, returns None (facts must be asserted before being referenced).
+    /// If the key doesn't exist, creates a new unasserted fact (row exists but marked as false).
     pub fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
         if !self.truth_enabled {
             return None;
         }
 
-        // Check if the row already exists
-        let row = self.get_row(key)?;
+        // Validate key length
+        if key.len() != self.n_keys {
+            return None;
+        }
 
-        // Row exists, ensure it has a fact ID
-        if let Some(&fact_id) = self.fact_id_map.get(&row.id) {
-            Some(fact_id)
+        // Check if the row already exists
+        if let Some(row) = self.get_row(key) {
+            // Row exists, ensure it has a fact ID
+            if let Some(&fact_id) = self.fact_id_map.get(&row.id) {
+                Some(fact_id)
+            } else {
+                // Row exists but no fact ID yet, assign one
+                // Keep its existing truth status (it was asserted)
+                let fact_id = self.next_fact_id;
+                self.next_fact_id = self.next_fact_id.inc();
+                self.fact_id_map.insert(row.id, fact_id);
+                self.fact_lookup.insert(fact_id, row.id);
+                self.fact_truth_status.insert(fact_id, true);
+                Some(fact_id)
+            }
         } else {
-            // Row exists but no fact ID yet, assign one
+            // Row doesn't exist - create it as an unasserted fact
+            // For a pure relation, the row is just the key (no additional value columns)
+            // For a function, we'd need default values, but unasserted facts are typically for relations
+
+            // Construct the full row: key + default values for non-key columns
+            // For relations, n_columns == n_keys, so this just copies the key
+            // For functions, we need Value::stale() for value columns
+            let mut full_row = Vec::with_capacity(self.n_columns);
+            full_row.extend_from_slice(key);
+
+            // Add stale values for any non-key columns
+            for _ in self.n_keys..self.n_columns {
+                full_row.push(Value::stale());
+            }
+
+            // First check again with get_entry_mut to avoid race conditions
+            let n_keys = self.n_keys;
+            let entry = get_entry_mut(&full_row, n_keys, &mut self.hash, |row| {
+                let Some(row_data) = self.data.get_row(row) else {
+                    return false;
+                };
+                &row_data[0..n_keys] == key
+            });
+
+            if entry.is_some() {
+                // Race condition: row was just added, treat as existing
+                return self.create_or_lookup_unasserted_fact(key);
+            }
+
+            // Create the new row
+            let new_row = self.data.add_row(&full_row);
             let fact_id = self.next_fact_id;
             self.next_fact_id = self.next_fact_id.inc();
-            self.fact_id_map.insert(row.id, fact_id);
-            self.fact_lookup.insert(fact_id, row.id);
-            // Default to asserted since the row exists
-            self.fact_truth_status.insert(fact_id, true);
+
+            // Set up the mappings
+            self.fact_id_map.insert(new_row, fact_id);
+            self.fact_lookup.insert(fact_id, new_row);
+            // Mark as UNASSERTED (false) - this is the core of modal logic
+            self.fact_truth_status.insert(fact_id, false);
+
+            // Insert into the hash table
+            let (shard_id, hc) = hash_code(self.hash.shard_data(), &full_row, n_keys);
+            self.hash.mut_shards()[shard_id.index()].insert_unique(
+                hc as _,
+                TableEntry {
+                    hashcode: hc as _,
+                    row: new_row,
+                },
+                TableEntry::hashcode,
+            );
+
             Some(fact_id)
         }
     }

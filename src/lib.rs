@@ -406,19 +406,14 @@ impl Default for EGraph {
                     // Remaining arguments are the tuple key
                     let key = &args[1..];
 
-                    // Try to look up the row in the table
-                    let table = exec_state.get_table(table_id);
-                    if let Some(row) = table.get_row(key) {
-                        // Check if this row has a fact ID
-                        if let Some(fact_id) = table.get_fact_id_for_row(row.id) {
-                            // Create and return the FactRef
-                            let fact_ref = FactRef { table_id, fact_id };
-                            let base_values = exec_state.base_values();
-                            return Some(base_values.get(fact_ref));
-                        }
+                    // Create or lookup the fact reference, creating an unasserted fact if needed
+                    // This is the key change: instead of just looking up, we create if it doesn't exist
+                    if let Some(fact_ref) = exec_state.create_unasserted_fact_ref(table_id, key) {
+                        let base_values = exec_state.base_values();
+                        return Some(base_values.get(fact_ref));
                     }
 
-                    // Fact doesn't exist or doesn't have fact tracking enabled
+                    // Fact tracking not enabled on this table
                     None
                 }));
 
