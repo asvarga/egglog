@@ -920,13 +920,12 @@ impl SortedWritesTable {
                             if self.truth_enabled {
                                 // Check if this is a pending unasserted fact
                                 let key = &query[0..n_keys];
-                                let is_pending_unasserted = if let Some(ref mut pending) =
-                                    self.pending_unasserted_facts
-                                {
-                                    pending.remove(key)
-                                } else {
-                                    None
-                                };
+                                let is_pending_unasserted =
+                                    if let Some(ref mut pending) = self.pending_unasserted_facts {
+                                        pending.remove(key)
+                                    } else {
+                                        None
+                                    };
 
                                 if let Some(fact_id) = is_pending_unasserted {
                                     // This row corresponds to a previously allocated unasserted fact
@@ -1017,13 +1016,12 @@ impl SortedWritesTable {
                             if self.truth_enabled {
                                 // Check if this is a pending unasserted fact
                                 let key = &query[0..n_keys];
-                                let is_pending_unasserted = if let Some(ref mut pending) =
-                                    self.pending_unasserted_facts
-                                {
-                                    pending.remove(key)
-                                } else {
-                                    None
-                                };
+                                let is_pending_unasserted =
+                                    if let Some(ref mut pending) = self.pending_unasserted_facts {
+                                        pending.remove(key)
+                                    } else {
+                                        None
+                                    };
 
                                 if let Some(fact_id) = is_pending_unasserted {
                                     // This row corresponds to a previously allocated unasserted fact
@@ -1329,26 +1327,26 @@ impl SortedWritesTable {
             }
         } else {
             // Row doesn't exist - we need to create it as an unasserted fact
-            // 
+            //
             // CRITICAL FIX: Instead of directly inserting into table data structures
             // (which causes Value IDs to become stale after e-graph unification),
             // we allocate a FactID NOW and then queue the actual insertion.
             // The insertion will happen during the next merge() call, ensuring
             // the row uses canonical Value IDs via normal rebuild mechanisms.
-            
+
             let fact_id = self.next_fact_id;
             self.next_fact_id = self.next_fact_id.inc();
-            
+
             // Mark this fact as unasserted IMMEDIATELY
             // When the row is actually created during serial_insert, we'll assign this fact_id to it
             self.fact_truth_status.insert(fact_id, false);
-            
+
             // Store the pending unasserted fact with its allocated ID
             // We'll match it to the actual row after insertion
             if self.pending_unasserted_facts.is_none() {
                 self.pending_unasserted_facts = Some(HashMap::default());
             }
-            
+
             // Construct the full row for queueing
             let mut full_row = Vec::with_capacity(self.n_columns);
             full_row.extend_from_slice(key);
@@ -1356,7 +1354,7 @@ impl SortedWritesTable {
             for _ in self.n_keys..self.n_columns {
                 full_row.push(Value::stale());
             }
-            
+
             // Store the fact_id associated with this key pattern
             // We use the key (not full_row) since that's what will be used for lookup
             let key_vec = key.to_vec();
@@ -1364,15 +1362,15 @@ impl SortedWritesTable {
                 .as_mut()
                 .unwrap()
                 .insert(key_vec, fact_id);
-            
+
             // Queue the insertion through normal mechanisms
             // This ensures it will go through rebuild and use canonical IDs
             let mut buffer = self.new_buffer();
             buffer.stage_insert(&full_row);
-            
+
             // Important: Drop the buffer to ensure it's committed to pending queue
             drop(buffer);
-            
+
             Some(fact_id)
         }
     }
