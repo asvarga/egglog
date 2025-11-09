@@ -164,6 +164,8 @@ pub struct FunctionConfig {
     pub name: String,
     /// Whether or not subsumption is enabled for this function.
     pub can_subsume: bool,
+    /// Whether truth tracking will be enabled for this function (allocates column space).
+    pub will_enable_truth_tracking: bool,
 }
 
 impl EGraph {
@@ -890,6 +892,7 @@ impl EGraph {
             merge,
             name,
             can_subsume,
+            will_enable_truth_tracking,
         } = config;
         assert!(
             !schema.is_empty(),
@@ -904,7 +907,7 @@ impl EGraph {
         let schema_math = SchemaMath {
             tracing: self.tracing,
             subsume: can_subsume,
-            truth_tracking: false, // Will be set via enable_truth_tracking() if needed
+            truth_tracking: will_enable_truth_tracking, // Allocate column space upfront
             func_cols: schema.len(),
         };
         let n_args = schema_math.num_keys();

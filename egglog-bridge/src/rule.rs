@@ -663,6 +663,8 @@ impl RuleBuilder<'_> {
                             write_vals.push(wv_ref);
                         } else if schema_math.subsume && i == schema_math.subsume_col() {
                             write_vals.push(inner.convert(&subsumed).into())
+                        } else if schema_math.truth_tracking && i == schema_math.truth_col() {
+                            write_vals.push(ASSERTED.into())
                         } else {
                             unreachable!()
                         }

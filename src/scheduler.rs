@@ -341,6 +341,7 @@ impl SchedulerRuleInfo {
             merge: MergeFn::AssertEq,
             name: "backend".to_string(),
             can_subsume: false,
+            will_enable_truth_tracking: false, // Scheduler tables don't need fact tracking
         });
 
         // Step 1: build the query rule

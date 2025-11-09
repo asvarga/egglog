@@ -610,6 +610,7 @@ impl EGraph {
             },
             name: decl.name.to_string(),
             can_subsume,
+            will_enable_truth_tracking: decl.fact_tracking, // Pass through fact tracking flag
         });
 
         let function = Function {
