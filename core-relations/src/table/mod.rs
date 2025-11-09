@@ -634,6 +634,19 @@ impl Table for SortedWritesTable {
     fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
         self.create_or_lookup_unasserted_fact(key)
     }
+
+    fn should_include_row(&self, row_id: RowId, require_asserted: bool) -> bool {
+        if !require_asserted || !self.truth_enabled {
+            // Not filtering by truth status, include all rows
+            return true;
+        }
+        // Filter by truth status - only include asserted facts
+        match self.is_row_asserted(row_id) {
+            Some(true) => true,   // Asserted fact, include it
+            Some(false) => false, // Unasserted fact, exclude it
+            None => true,         // No fact tracking for this row, include it
+        }
+    }
 }
 
 impl SortedWritesTable {
@@ -840,17 +853,28 @@ impl SortedWritesTable {
                                 .data
                                 .get_row(*row)
                                 .expect("table should not point to stale entry");
-                            if (self.merge)(exec_state, cur, query, &mut scratch) {
+                            let merge_result = (self.merge)(exec_state, cur, query, &mut scratch);
+                            if merge_result {
                                 let sort_val = query[sort_by.index()];
                                 let new = self.data.add_row(&scratch);
-                                // Assign fact ID for new merged row
-                                if self.truth_enabled && !self.fact_id_map.contains_key(&new) {
-                                    let fact_id = self.next_fact_id;
-                                    self.next_fact_id = self.next_fact_id.inc();
-                                    self.fact_id_map.insert(new, fact_id);
-                                    self.fact_lookup.insert(fact_id, new);
-                                    // New facts default to asserted
-                                    self.fact_truth_status.insert(fact_id, true);
+                                // Handle fact ID transfer and truth status update
+                                if self.truth_enabled {
+                                    if let Some(&old_fact_id) = self.fact_id_map.get(row) {
+                                        // Transfer the fact ID from old row to new row
+                                        self.fact_id_map.remove(row);
+                                        self.fact_id_map.insert(new, old_fact_id);
+                                        self.fact_lookup.insert(old_fact_id, new);
+                                        // Update truth status to asserted (merging with explicit assertion)
+                                        self.fact_truth_status.insert(old_fact_id, true);
+                                    } else {
+                                        // Old row didn't have a fact ID, create new one
+                                        let fact_id = self.next_fact_id;
+                                        self.next_fact_id = self.next_fact_id.inc();
+                                        self.fact_id_map.insert(new, fact_id);
+                                        self.fact_lookup.insert(fact_id, new);
+                                        // New facts default to asserted
+                                        self.fact_truth_status.insert(fact_id, true);
+                                    }
                                 }
                                 if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                     assert!(
@@ -866,6 +890,20 @@ impl SortedWritesTable {
                                 self.data.set_stale(*row);
                                 *row = new;
                                 changed = true;
+                            } else if self.truth_enabled {
+                                // Even if merge returned false (no data change), we may need to update truth status
+                                // This handles the case where an unasserted fact is explicitly asserted
+                                if let Some(&fact_id) = self.fact_id_map.get(row) {
+                                    if let Some(&current_status) =
+                                        self.fact_truth_status.get(&fact_id)
+                                    {
+                                        if !current_status {
+                                            // Fact was unasserted, now being asserted
+                                            self.fact_truth_status.insert(fact_id, true);
+                                            changed = true;
+                                        }
+                                    }
+                                }
                             }
                             scratch.clear();
                         } else {
@@ -933,6 +971,20 @@ impl SortedWritesTable {
                                 self.data.set_stale(old_row);
                                 *row = new;
                                 changed = true;
+                            } else if self.truth_enabled {
+                                // Even if merge returned false (no data change), we may need to update truth status
+                                // This handles the case where an unasserted fact is explicitly asserted
+                                if let Some(&fact_id) = self.fact_id_map.get(row) {
+                                    if let Some(&current_status) =
+                                        self.fact_truth_status.get(&fact_id)
+                                    {
+                                        if !current_status {
+                                            // Fact was unasserted, now being asserted
+                                            self.fact_truth_status.insert(fact_id, true);
+                                            changed = true;
+                                        }
+                                    }
+                                }
                             }
                             scratch.clear();
                         } else {
@@ -1287,6 +1339,22 @@ impl SortedWritesTable {
                 TableEntry::hashcode,
             );
 
+            // For sorted tables, also update offsets
+            if let Some(sort_by) = self.sort_by {
+                let sort_val = full_row[sort_by.index()];
+                if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
+                    // For unasserted facts, we may not maintain strict ordering during creation
+                    // This is acceptable as offsets are primarily for optimization
+                    if sort_val >= largest {
+                        if sort_val > largest {
+                            self.offsets.push((sort_val, new_row));
+                        }
+                    }
+                } else {
+                    self.offsets.push((sort_val, new_row));
+                }
+            }
+
             Some(fact_id)
         }
     }
@@ -1297,6 +1365,8 @@ impl SortedWritesTable {
             self.fact_id_map.remove(&old_row);
             self.fact_id_map.insert(new_row, fact_id);
             self.fact_lookup.insert(fact_id, new_row);
+            // When updating a fact mapping (due to merge/assertion), mark as asserted
+            self.fact_truth_status.insert(fact_id, true);
         }
     }
 
@@ -1340,6 +1410,17 @@ impl SortedWritesTable {
     /// Get all fact IDs currently in the table
     pub fn get_all_fact_ids(&self) -> Vec<FactId> {
         self.fact_lookup.keys().copied().collect()
+    }
+
+    /// Check if a row corresponds to an asserted fact (truth_status = true).
+    /// Returns None if fact tracking is not enabled or the row has no fact ID.
+    /// Returns Some(true) if the fact is asserted, Some(false) if unasserted.
+    pub fn is_row_asserted(&self, row: RowId) -> Option<bool> {
+        if !self.truth_enabled {
+            return None;
+        }
+        let fact_id = self.fact_id_map.get(&row)?;
+        Some(*self.fact_truth_status.get(fact_id).unwrap_or(&false))
     }
 
     fn maybe_rehash(&mut self) {

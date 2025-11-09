@@ -923,6 +923,7 @@ impl EGraph {
                 &self.functions,
                 &self.type_info,
             );
+            // Regular rules don't include subsumed facts
             translator.query(query, false);
             translator.actions(actions)?;
             translator.build()
@@ -1087,7 +1088,8 @@ impl EGraph {
             &self.functions,
             &self.type_info,
         );
-        translator.query(&query, true);
+        // For check, we don't want to include subsumed facts
+        translator.query(&query, false);
         translator
             .rb
             .call_external_func(ext_id, &[], egglog_bridge::ColumnTy::Id, || {

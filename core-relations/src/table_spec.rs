@@ -401,6 +401,15 @@ pub trait Table: Any + Send + Sync {
     fn create_or_lookup_unasserted_fact(&mut self, _key: &[Value]) -> Option<FactId> {
         None // Default implementation: no fact tracking
     }
+
+    /// Check if a row should be included in queries based on truth status.
+    ///
+    /// Returns Some(true) if the row should be included (it's asserted or truth tracking is disabled).
+    /// Returns Some(false) if the row should be excluded (it's unasserted).
+    /// Returns None if the row has no fact tracking information.
+    fn should_include_row(&self, _row_id: RowId, _require_asserted: bool) -> bool {
+        true // Default: include all rows
+    }
 }
 
 /// A trait specifying a buffer of pending mutations for a [`Table`].
