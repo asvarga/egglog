@@ -156,6 +156,10 @@ pub struct SortedWritesTable {
     fact_lookup: HashMap<FactId, RowId>,
     fact_truth_status: HashMap<FactId, bool>, // true = asserted, false = referenced only
     truth_enabled: bool,
+    // Track pending unasserted facts: key -> allocated FactId
+    // These facts have been allocated IDs but haven't been inserted into the table yet
+    // They're queued for insertion and will be assigned to actual rows during merge
+    pending_unasserted_facts: Option<HashMap<Vec<Value>, FactId>>,
 }
 
 impl Clone for SortedWritesTable {
@@ -178,6 +182,7 @@ impl Clone for SortedWritesTable {
             fact_lookup: self.fact_lookup.clone(),
             fact_truth_status: self.fact_truth_status.clone(),
             truth_enabled: self.truth_enabled,
+            pending_unasserted_facts: self.pending_unasserted_facts.clone(),
         }
     }
 }
@@ -689,6 +694,7 @@ impl SortedWritesTable {
             fact_lookup: HashMap::default(),
             fact_truth_status: HashMap::default(),
             truth_enabled: false,
+            pending_unasserted_facts: None,
         }
     }
 
@@ -912,12 +918,29 @@ impl SortedWritesTable {
                             let new = self.data.add_row(query);
                             // Assign fact ID for new row
                             if self.truth_enabled {
-                                let fact_id = self.next_fact_id;
-                                self.next_fact_id = self.next_fact_id.inc();
-                                self.fact_id_map.insert(new, fact_id);
-                                self.fact_lookup.insert(fact_id, new);
-                                // New facts default to asserted
-                                self.fact_truth_status.insert(fact_id, true);
+                                // Check if this is a pending unasserted fact
+                                let key = &query[0..n_keys];
+                                let is_pending_unasserted = if let Some(ref mut pending) =
+                                    self.pending_unasserted_facts
+                                {
+                                    pending.remove(key)
+                                } else {
+                                    None
+                                };
+
+                                if let Some(fact_id) = is_pending_unasserted {
+                                    // This row corresponds to a previously allocated unasserted fact
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                    // Truth status was already set to false when fact_id was allocated
+                                } else {
+                                    // Regular insertion - allocate new fact ID and mark as asserted
+                                    let fact_id = self.next_fact_id;
+                                    self.next_fact_id = self.next_fact_id.inc();
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                    self.fact_truth_status.insert(fact_id, true);
+                                }
                             }
                             if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
                                 assert!(
@@ -992,12 +1015,29 @@ impl SortedWritesTable {
                             let new = self.data.add_row(query);
                             // Assign fact ID for new row (unsorted)
                             if self.truth_enabled {
-                                let fact_id = self.next_fact_id;
-                                self.next_fact_id = self.next_fact_id.inc();
-                                self.fact_id_map.insert(new, fact_id);
-                                self.fact_lookup.insert(fact_id, new);
-                                // New facts default to asserted
-                                self.fact_truth_status.insert(fact_id, true);
+                                // Check if this is a pending unasserted fact
+                                let key = &query[0..n_keys];
+                                let is_pending_unasserted = if let Some(ref mut pending) =
+                                    self.pending_unasserted_facts
+                                {
+                                    pending.remove(key)
+                                } else {
+                                    None
+                                };
+
+                                if let Some(fact_id) = is_pending_unasserted {
+                                    // This row corresponds to a previously allocated unasserted fact
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                    // Truth status was already set to false when fact_id was allocated
+                                } else {
+                                    // Regular insertion - allocate new fact ID and mark as asserted
+                                    let fact_id = self.next_fact_id;
+                                    self.next_fact_id = self.next_fact_id.inc();
+                                    self.fact_id_map.insert(new, fact_id);
+                                    self.fact_lookup.insert(fact_id, new);
+                                    self.fact_truth_status.insert(fact_id, true);
+                                }
                             }
                             let (shard, hc) = hash_code(self.hash.shard_data(), query, self.n_keys);
                             debug_assert_eq!(shard, _outer_shard);
@@ -1288,73 +1328,51 @@ impl SortedWritesTable {
                 Some(fact_id)
             }
         } else {
-            // Row doesn't exist - create it as an unasserted fact
-            // For a pure relation, the row is just the key (no additional value columns)
-            // For a function, we'd need default values, but unasserted facts are typically for relations
-
-            // Construct the full row: key + default values for non-key columns
-            // For relations, n_columns == n_keys, so this just copies the key
-            // For functions, we need Value::stale() for value columns
+            // Row doesn't exist - we need to create it as an unasserted fact
+            // 
+            // CRITICAL FIX: Instead of directly inserting into table data structures
+            // (which causes Value IDs to become stale after e-graph unification),
+            // we allocate a FactID NOW and then queue the actual insertion.
+            // The insertion will happen during the next merge() call, ensuring
+            // the row uses canonical Value IDs via normal rebuild mechanisms.
+            
+            let fact_id = self.next_fact_id;
+            self.next_fact_id = self.next_fact_id.inc();
+            
+            // Mark this fact as unasserted IMMEDIATELY
+            // When the row is actually created during serial_insert, we'll assign this fact_id to it
+            self.fact_truth_status.insert(fact_id, false);
+            
+            // Store the pending unasserted fact with its allocated ID
+            // We'll match it to the actual row after insertion
+            if self.pending_unasserted_facts.is_none() {
+                self.pending_unasserted_facts = Some(HashMap::default());
+            }
+            
+            // Construct the full row for queueing
             let mut full_row = Vec::with_capacity(self.n_columns);
             full_row.extend_from_slice(key);
-
             // Add stale values for any non-key columns
             for _ in self.n_keys..self.n_columns {
                 full_row.push(Value::stale());
             }
-
-            // First check again with get_entry_mut to avoid race conditions
-            let n_keys = self.n_keys;
-            let entry = get_entry_mut(&full_row, n_keys, &mut self.hash, |row| {
-                let Some(row_data) = self.data.get_row(row) else {
-                    return false;
-                };
-                &row_data[0..n_keys] == key
-            });
-
-            if entry.is_some() {
-                // Race condition: row was just added, treat as existing
-                return self.create_or_lookup_unasserted_fact(key);
-            }
-
-            // Create the new row
-            let new_row = self.data.add_row(&full_row);
-            let fact_id = self.next_fact_id;
-            self.next_fact_id = self.next_fact_id.inc();
-
-            // Set up the mappings
-            self.fact_id_map.insert(new_row, fact_id);
-            self.fact_lookup.insert(fact_id, new_row);
-            // Mark as UNASSERTED (false) - this is the core of modal logic
-            self.fact_truth_status.insert(fact_id, false);
-
-            // Insert into the hash table
-            let (shard_id, hc) = hash_code(self.hash.shard_data(), &full_row, n_keys);
-            self.hash.mut_shards()[shard_id.index()].insert_unique(
-                hc as _,
-                TableEntry {
-                    hashcode: hc as _,
-                    row: new_row,
-                },
-                TableEntry::hashcode,
-            );
-
-            // For sorted tables, also update offsets
-            if let Some(sort_by) = self.sort_by {
-                let sort_val = full_row[sort_by.index()];
-                if let Some(largest) = self.offsets.last().map(|(v, _)| *v) {
-                    // For unasserted facts, we may not maintain strict ordering during creation
-                    // This is acceptable as offsets are primarily for optimization
-                    if sort_val >= largest {
-                        if sort_val > largest {
-                            self.offsets.push((sort_val, new_row));
-                        }
-                    }
-                } else {
-                    self.offsets.push((sort_val, new_row));
-                }
-            }
-
+            
+            // Store the fact_id associated with this key pattern
+            // We use the key (not full_row) since that's what will be used for lookup
+            let key_vec = key.to_vec();
+            self.pending_unasserted_facts
+                .as_mut()
+                .unwrap()
+                .insert(key_vec, fact_id);
+            
+            // Queue the insertion through normal mechanisms
+            // This ensures it will go through rebuild and use canonical IDs
+            let mut buffer = self.new_buffer();
+            buffer.stage_insert(&full_row);
+            
+            // Important: Drop the buffer to ensure it's committed to pending queue
+            drop(buffer);
+            
             Some(fact_id)
         }
     }
