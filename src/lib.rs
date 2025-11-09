@@ -923,8 +923,8 @@ impl EGraph {
                 &self.functions,
                 &self.type_info,
             );
-            // Regular rules don't include subsumed facts
-            translator.query(query, false);
+            // Regular rules don't include subsumed facts, and should see all facts (asserted and unasserted)
+            translator.query(query, false, false);
             translator.actions(actions)?;
             translator.build()
         };
@@ -1115,8 +1115,8 @@ impl EGraph {
                             &self.functions,
                             &self.type_info,
                         );
-                        // For check, exclude subsumed facts
-                        translator.query(&query, false);
+                        // For check on fact-tracked relations, exclude subsumed facts AND require assertion
+                        translator.query(&query, false, true);
                         translator.rb.call_external_func(
                             ext_id,
                             &[],
@@ -1188,7 +1188,8 @@ impl EGraph {
             &self.type_info,
         );
         // For check, we don't want to include subsumed facts
-        translator.query(&query, false);
+        // For fact-tracked relations, also require facts to be asserted
+        translator.query(&query, false, true);
         translator
             .rb
             .call_external_func(ext_id, &[], egglog_bridge::ColumnTy::Id, || {
@@ -1862,17 +1863,27 @@ impl<'a> BackendRule<'a> {
         args.into_iter().map(|x| self.entry(x)).collect()
     }
 
-    fn query(&mut self, query: &core::Query<ResolvedCall, ResolvedVar>, include_subsumed: bool) {
+    fn query(&mut self, query: &core::Query<ResolvedCall, ResolvedVar>, include_subsumed: bool, require_asserted: bool) {
         for atom in &query.atoms {
             match &atom.head {
                 ResolvedCall::Func(f) => {
-                    let f = self.func(f);
+                    let func_id = self.func(f);
                     let args = self.args(&atom.args);
                     let is_subsumed = match include_subsumed {
                         true => None,
                         false => Some(false),
                     };
-                    self.rb.query_table(f, &args, is_subsumed, None).unwrap();
+                    
+                    // Check if this function has fact tracking enabled
+                    // If so, and require_asserted is true, filter by truth status
+                    let function = &self.functions[&f.name];
+                    let require_asserted_for_query = if function.decl.fact_tracking && require_asserted {
+                        Some(true)
+                    } else {
+                        None
+                    };
+                    
+                    self.rb.query_table(func_id, &args, is_subsumed, require_asserted_for_query).unwrap();
                 }
                 ResolvedCall::Primitive(p) => {
                     let (p, args, ty) = self.prim(p, &atom.args);

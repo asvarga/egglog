@@ -349,7 +349,8 @@ impl SchedulerRuleInfo {
             &egraph.functions,
             &egraph.type_info,
         );
-        qrule_builder.query(&rule.body, true);
+        // Scheduler query rules should see all facts (include subsumed, include unasserted)
+        qrule_builder.query(&rule.body, true, false);
         let entries = free_vars
             .iter()
             .map(|fv| qrule_builder.entry(&GenericAtomTerm::Var(span!(), fv.clone())))
