@@ -190,6 +190,7 @@ impl ProofBuilder {
         let func_underlying = func_info.table;
         let schema_math = SchemaMath {
             subsume: func_info.can_subsume,
+            truth_tracking: func_info.fact_tracking,
             tracing: true,
             func_cols: func_info.schema.len(),
         };

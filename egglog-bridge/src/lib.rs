@@ -570,6 +570,7 @@ impl EGraph {
         let schema_math = SchemaMath {
             tracing: self.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         let mut extended_row = Vec::new();
@@ -631,6 +632,7 @@ impl EGraph {
         let schema_math = SchemaMath {
             tracing: self.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         let table_id = info.table;
@@ -674,6 +676,7 @@ impl EGraph {
             let schema_math = SchemaMath {
                 tracing: self.tracing,
                 subsume: table_info.can_subsume,
+                truth_tracking: table_info.fact_tracking,
                 func_cols: table_info.schema.len(),
             };
             let table_id = table_info.table;
@@ -793,6 +796,7 @@ impl EGraph {
         let schema_math = SchemaMath {
             tracing: self.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         let imp = self.db.get_table(table);
@@ -898,6 +902,7 @@ impl EGraph {
         let schema_math = SchemaMath {
             tracing: self.tracing,
             subsume: can_subsume,
+            truth_tracking: false, // Will be set via enable_truth_tracking() if needed
             func_cols: schema.len(),
         };
         let n_args = schema_math.num_keys();
@@ -929,6 +934,7 @@ impl EGraph {
             nonincremental_rebuild_rule: RuleId::new(!0),
             default_val: default,
             can_subsume,
+            fact_tracking: false, // Will be enabled via enable_truth_tracking() if needed
             name,
         });
         debug_assert_eq!(res, next_func_id);
@@ -946,6 +952,7 @@ impl EGraph {
     /// allowing facts to be referenced and reasoned about independently of
     /// their truth status.
     pub fn enable_truth_tracking(&mut self, func_id: FunctionId) {
+        self.funcs[func_id].fact_tracking = true;
         let table_id = self.funcs[func_id].table;
         let table = self.db.get_table_mut(table_id);
         table.enable_truth_tracking();
@@ -1228,14 +1235,12 @@ impl EGraph {
             Some(table),
             subsume_var.clone().map(QueryEntry::from),
             &vars,
-            None, // No truth filtering for rebuild rules
         );
         rb.add_atom_with_timestamp_and_func(
             uf_table,
             None,
             None,
             &[vars[col.index()].clone(), canon_val.clone()],
-            None, // No truth filtering for UF table
         );
         rb.set_focus(1); // Set the uf atom as the sole focus.
 
@@ -1271,7 +1276,6 @@ impl EGraph {
             Some(table),
             subsume_var.clone().map(QueryEntry::from),
             &vars,
-            None, // No truth filtering for rebuild rules
         );
         let mut lhs = SmallVec::<[QueryEntry; 4]>::new();
         let mut rhs = SmallVec::<[QueryEntry; 4]>::new();
@@ -1338,6 +1342,7 @@ struct FunctionInfo {
     nonincremental_rebuild_rule: RuleId,
     default_val: DefaultVal,
     can_subsume: bool,
+    fact_tracking: bool,
     name: Arc<str>,
 }
 
@@ -1644,6 +1649,7 @@ impl TableAction {
             table_math: SchemaMath {
                 func_cols: func_info.schema.len(),
                 subsume: func_info.can_subsume,
+                truth_tracking: func_info.fact_tracking,
                 tracing: egraph.tracing,
             },
             default: match &func_info.default_val {
@@ -2030,6 +2036,8 @@ struct SchemaMath {
     tracing: bool,
     /// Whether or not the table is enabled for subsumption.
     subsume: bool,
+    /// Whether or not the table tracks truth status (asserted vs referenced facts).
+    truth_tracking: bool,
     /// The number of columns in the function (including the return value).
     func_cols: usize,
 }

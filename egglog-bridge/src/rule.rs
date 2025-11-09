@@ -125,7 +125,7 @@ pub(crate) struct Query {
     vars: DenseIdMap<VariableId, VarInfo>,
     /// The current proofs that are in scope.
     atom_proofs: Vec<Variable>,
-    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath, Option<bool>)>,
+    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath)>,
     /// An optional callback to wire up proof-related metadata before running the RHS of a rule.
     build_reason: Option<BuildRuleCallback>,
     /// The builders for queries in this module essentially wrap the lower-level
@@ -385,7 +385,6 @@ impl RuleBuilder<'_> {
         func: Option<FunctionId>,
         subsume_entry: Option<QueryEntry>,
         entries: &[QueryEntry],
-        require_asserted: Option<bool>,
     ) -> AtomId {
         let mut atom = entries.to_vec();
         let schema_math = if let Some(func) = func {
@@ -394,12 +393,14 @@ impl RuleBuilder<'_> {
             SchemaMath {
                 tracing: self.egraph.tracing,
                 subsume: info.can_subsume,
+                truth_tracking: info.fact_tracking,
                 func_cols: info.schema.len(),
             }
         } else {
             SchemaMath {
                 tracing: self.egraph.tracing,
                 subsume: subsume_entry.is_some(),
+                truth_tracking: false, // UF table and other non-function tables don't track truth
                 func_cols: entries.len(),
             }
         };
@@ -434,7 +435,7 @@ impl RuleBuilder<'_> {
             }
             self.query.atom_proofs.push(proof_var);
         }
-        self.query.atoms.push((table, atom, schema_math, require_asserted));
+        self.query.atoms.push((table, atom, schema_math));
         res
     }
 
@@ -486,12 +487,16 @@ impl RuleBuilder<'_> {
             })?;
 
         // TODO: Implement truth status filtering
-        // For now, the require_asserted parameter is accepted but not yet used.
+        // The truth_tracking field is now in SchemaMath, which is extracted from
+        // FunctionInfo.fact_tracking. This enables generating constraints based on
+        // truth status during query planning.
+        // The require_asserted parameter is kept for API consistency but is redundant
+        // with schema_math.truth_tracking (which comes from the function's fact_tracking flag).
         // Full implementation requires either:
         // A) Adding truth status as a column (like subsumption) and filtering via constraint
         // B) Modifying scan methods to call should_include_row() during iteration
         // See TRUTH_STATUS_FILTERING_SOLUTION.md for details.
-        // For now, we pass require_asserted through to the atom metadata for future use.
+        let _ = require_asserted; // Acknowledged - info now in schema_math.truth_tracking
 
         Ok(self.add_atom_with_timestamp_and_func(
             info.table,
@@ -504,7 +509,6 @@ impl RuleBuilder<'_> {
                 ty: ColumnTy::Id,
             }),
             entries,
-            require_asserted,
         ))
     }
 
@@ -552,6 +556,7 @@ impl RuleBuilder<'_> {
         let schema_math = SchemaMath {
             tracing: self.egraph.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         assert!(info.can_subsume);
@@ -620,6 +625,7 @@ impl RuleBuilder<'_> {
         let schema_math = SchemaMath {
             tracing: self.egraph.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         let cb: BuildRuleCallback = match info.default_val {
@@ -862,6 +868,7 @@ impl RuleBuilder<'_> {
         let schema_math = SchemaMath {
             tracing: self.egraph.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
 
@@ -917,6 +924,7 @@ impl RuleBuilder<'_> {
         let schema_math = SchemaMath {
             tracing: self.egraph.tracing,
             subsume: info.can_subsume,
+            truth_tracking: info.fact_tracking,
             func_cols: info.schema.len(),
         };
         if self.egraph.tracing {
@@ -1037,7 +1045,7 @@ impl Query {
         let mut rsb = RuleSetBuilder::new(db);
         let (mut qb, mut inner) = self.query_state(&mut rsb);
         let mut atom_mapping = Vec::with_capacity(self.atoms.len());
-        for (table, entries, _schema_info, _require_asserted) in &self.atoms {
+        for (table, entries, _schema_info) in &self.atoms {
             atom_mapping.push(add_atom(&mut qb, *table, entries, &[], &mut inner)?);
         }
         let rule_id = self.run_rules_and_build(qb, inner, desc)?;
@@ -1066,7 +1074,7 @@ impl Query {
         }
         if let Some(focus_atom) = self.sole_focus {
             // There is a single "focus" atom that we will constrain to look at new values.
-            let (_, _, schema_info, _) = &self.atoms[focus_atom];
+            let (_, _, schema_info) = &self.atoms[focus_atom];
             let ts_col = ColumnId::from_usize(schema_info.ts_col());
             rsb.add_rule_from_cached_plan(
                 &cached_plan.plan,
@@ -1084,7 +1092,7 @@ impl Query {
         let mut constraints: Vec<(core_relations::AtomId, Constraint)> =
             Vec::with_capacity(self.atoms.len());
         'outer: for focus_atom in 0..self.atoms.len() {
-            for (i, (_, _, schema_info, _)) in self.atoms.iter().enumerate() {
+            for (i, (_, _, schema_info)) in self.atoms.iter().enumerate() {
                 let ts_col = ColumnId::from_usize(schema_info.ts_col());
                 match i.cmp(&focus_atom) {
                     Ordering::Less => {
