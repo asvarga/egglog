@@ -1863,7 +1863,12 @@ impl<'a> BackendRule<'a> {
         args.into_iter().map(|x| self.entry(x)).collect()
     }
 
-    fn query(&mut self, query: &core::Query<ResolvedCall, ResolvedVar>, include_subsumed: bool, require_asserted: bool) {
+    fn query(
+        &mut self,
+        query: &core::Query<ResolvedCall, ResolvedVar>,
+        include_subsumed: bool,
+        require_asserted: bool,
+    ) {
         for atom in &query.atoms {
             match &atom.head {
                 ResolvedCall::Func(f) => {
@@ -1873,17 +1878,20 @@ impl<'a> BackendRule<'a> {
                         true => None,
                         false => Some(false),
                     };
-                    
+
                     // Check if this function has fact tracking enabled
                     // If so, and require_asserted is true, filter by truth status
                     let function = &self.functions[&f.name];
-                    let require_asserted_for_query = if function.decl.fact_tracking && require_asserted {
-                        Some(true)
-                    } else {
-                        None
-                    };
-                    
-                    self.rb.query_table(func_id, &args, is_subsumed, require_asserted_for_query).unwrap();
+                    let require_asserted_for_query =
+                        if function.decl.fact_tracking && require_asserted {
+                            Some(true)
+                        } else {
+                            None
+                        };
+
+                    self.rb
+                        .query_table(func_id, &args, is_subsumed, require_asserted_for_query)
+                        .unwrap();
                 }
                 ResolvedCall::Primitive(p) => {
                     let (p, args, ty) = self.prim(p, &atom.args);
