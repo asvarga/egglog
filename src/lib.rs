@@ -1065,20 +1065,16 @@ impl EGraph {
         for fact in facts {
             // Extract the function call from the fact (if it's a simple Fact, not Eq)
             let func_name = match fact {
-                GenericFact::Fact(expr) => {
-                    match expr {
-                        GenericExpr::Call(_, head, _) => {
-                            match head {
-                                ResolvedCall::Func(func_type) => Some(&func_type.name),
-                                _ => None,
-                            }
-                        }
+                GenericFact::Fact(expr) => match expr {
+                    GenericExpr::Call(_, head, _) => match head {
+                        ResolvedCall::Func(func_type) => Some(&func_type.name),
                         _ => None,
-                    }
-                }
+                    },
+                    _ => None,
+                },
                 _ => None,
             };
-            
+
             // If we found a function name, check if it has fact tracking enabled
             if let Some(func_name) = func_name {
                 // Get the function info
@@ -1087,7 +1083,7 @@ impl EGraph {
                     if function.decl.fact_tracking {
                         // Need to evaluate the fact arguments to get the actual values
                         // For now, we'll do a simpler check: run the query and verify matches are asserted
-                        
+
                         // Convert fact to a query
                         let fresh_name = self.parser.symbol_gen.fresh("check_fact");
                         let fresh_ruleset = self.parser.symbol_gen.fresh("check_fact_ruleset");
@@ -1098,19 +1094,21 @@ impl EGraph {
                             name: fresh_name.clone(),
                             ruleset: fresh_ruleset.clone(),
                         };
-                        let core_rule = rule
-                            .to_canonicalized_core_rule(&self.type_info, &mut self.parser.symbol_gen)?;
+                        let core_rule = rule.to_canonicalized_core_rule(
+                            &self.type_info,
+                            &mut self.parser.symbol_gen,
+                        )?;
                         let query = core_rule.body;
 
                         // Create a side channel to capture if query matched
                         let ext_sc = egglog_bridge::SideChannel::default();
                         let ext_sc_ref = ext_sc.clone();
-                        let ext_id = self.backend.register_external_func(make_external_func(
-                            move |_, _| {
-                                *ext_sc_ref.lock().unwrap() = Some(());
-                                Some(Value::new_const(0))
-                            },
-                        ));
+                        let ext_id =
+                            self.backend
+                                .register_external_func(make_external_func(move |_, _| {
+                                    *ext_sc_ref.lock().unwrap() = Some(());
+                                    Some(Value::new_const(0))
+                                }));
 
                         let mut translator = BackendRule::new(
                             self.backend.new_rule("check_fact", false),
