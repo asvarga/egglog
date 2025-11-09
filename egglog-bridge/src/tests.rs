@@ -712,6 +712,7 @@ fn container_test() {
             add_table,
             &[lhs_id.clone(), rhs_id.clone(), add_id.clone()],
             Some(false),
+            None,
         )
         .unwrap();
         let evaled: QueryEntry = rb

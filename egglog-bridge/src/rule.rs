@@ -465,6 +465,7 @@ impl RuleBuilder<'_> {
         func: FunctionId,
         entries: &[QueryEntry],
         is_subsumed: Option<bool>,
+        require_asserted: Option<bool>,
     ) -> Result<AtomId> {
         let info = &self.egraph.funcs[func];
         let schema = &info.schema;
@@ -482,6 +483,15 @@ impl RuleBuilder<'_> {
                 self.assert_has_ty(entry, *ty)
                     .with_context(|| format!("query_table: mismatch between {entry:?} and {ty:?}"))
             })?;
+        
+        // TODO: Implement truth status filtering
+        // For now, the require_asserted parameter is accepted but not yet used.
+        // Full implementation requires either:
+        // A) Adding truth status as a column (like subsumption) and filtering via constraint
+        // B) Modifying scan methods to call should_include_row() during iteration
+        // See TRUTH_STATUS_FILTERING_SOLUTION.md for details.
+        let _ = require_asserted; // Acknowledge parameter to avoid unused warning
+        
         Ok(self.add_atom_with_timestamp_and_func(
             info.table,
             Some(func),

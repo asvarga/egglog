@@ -375,7 +375,7 @@ impl SchedulerRuleInfo {
         entries.push(unit_entry);
         arule_builder
             .rb
-            .query_table(decided, &entries, None)
+            .query_table(decided, &entries, None, None)
             .unwrap();
         arule_builder.actions(&rule.head).unwrap();
         // Remove the entry as it's now done
