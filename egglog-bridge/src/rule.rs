@@ -125,7 +125,7 @@ pub(crate) struct Query {
     vars: DenseIdMap<VariableId, VarInfo>,
     /// The current proofs that are in scope.
     atom_proofs: Vec<Variable>,
-    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath)>,
+    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath, Option<bool>)>,
     /// An optional callback to wire up proof-related metadata before running the RHS of a rule.
     build_reason: Option<BuildRuleCallback>,
     /// The builders for queries in this module essentially wrap the lower-level
@@ -385,6 +385,7 @@ impl RuleBuilder<'_> {
         func: Option<FunctionId>,
         subsume_entry: Option<QueryEntry>,
         entries: &[QueryEntry],
+        require_asserted: Option<bool>,
     ) -> AtomId {
         let mut atom = entries.to_vec();
         let schema_math = if let Some(func) = func {
@@ -433,7 +434,7 @@ impl RuleBuilder<'_> {
             }
             self.query.atom_proofs.push(proof_var);
         }
-        self.query.atoms.push((table, atom, schema_math));
+        self.query.atoms.push((table, atom, schema_math, require_asserted));
         res
     }
 
@@ -490,7 +491,7 @@ impl RuleBuilder<'_> {
         // A) Adding truth status as a column (like subsumption) and filtering via constraint
         // B) Modifying scan methods to call should_include_row() during iteration
         // See TRUTH_STATUS_FILTERING_SOLUTION.md for details.
-        let _ = require_asserted; // Acknowledge parameter to avoid unused warning
+        // For now, we pass require_asserted through to the atom metadata for future use.
 
         Ok(self.add_atom_with_timestamp_and_func(
             info.table,
@@ -503,6 +504,7 @@ impl RuleBuilder<'_> {
                 ty: ColumnTy::Id,
             }),
             entries,
+            require_asserted,
         ))
     }
 
@@ -1035,7 +1037,7 @@ impl Query {
         let mut rsb = RuleSetBuilder::new(db);
         let (mut qb, mut inner) = self.query_state(&mut rsb);
         let mut atom_mapping = Vec::with_capacity(self.atoms.len());
-        for (table, entries, _schema_info) in &self.atoms {
+        for (table, entries, _schema_info, _require_asserted) in &self.atoms {
             atom_mapping.push(add_atom(&mut qb, *table, entries, &[], &mut inner)?);
         }
         let rule_id = self.run_rules_and_build(qb, inner, desc)?;
@@ -1064,7 +1066,7 @@ impl Query {
         }
         if let Some(focus_atom) = self.sole_focus {
             // There is a single "focus" atom that we will constrain to look at new values.
-            let (_, _, schema_info) = &self.atoms[focus_atom];
+            let (_, _, schema_info, _) = &self.atoms[focus_atom];
             let ts_col = ColumnId::from_usize(schema_info.ts_col());
             rsb.add_rule_from_cached_plan(
                 &cached_plan.plan,
@@ -1082,7 +1084,7 @@ impl Query {
         let mut constraints: Vec<(core_relations::AtomId, Constraint)> =
             Vec::with_capacity(self.atoms.len());
         'outer: for focus_atom in 0..self.atoms.len() {
-            for (i, (_, _, schema_info)) in self.atoms.iter().enumerate() {
+            for (i, (_, _, schema_info, _)) in self.atoms.iter().enumerate() {
                 let ts_col = ColumnId::from_usize(schema_info.ts_col());
                 match i.cmp(&focus_atom) {
                     Ordering::Less => {

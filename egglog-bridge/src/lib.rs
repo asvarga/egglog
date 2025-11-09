@@ -1228,12 +1228,14 @@ impl EGraph {
             Some(table),
             subsume_var.clone().map(QueryEntry::from),
             &vars,
+            None, // No truth filtering for rebuild rules
         );
         rb.add_atom_with_timestamp_and_func(
             uf_table,
             None,
             None,
             &[vars[col.index()].clone(), canon_val.clone()],
+            None, // No truth filtering for UF table
         );
         rb.set_focus(1); // Set the uf atom as the sole focus.
 
@@ -1269,6 +1271,7 @@ impl EGraph {
             Some(table),
             subsume_var.clone().map(QueryEntry::from),
             &vars,
+            None, // No truth filtering for rebuild rules
         );
         let mut lhs = SmallVec::<[QueryEntry; 4]>::new();
         let mut rhs = SmallVec::<[QueryEntry; 4]>::new();
