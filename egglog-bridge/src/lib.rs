@@ -587,6 +587,7 @@ impl EGraph {
                 ret_val: Some(res),
                 proof: term,
                 subsume: schema_math.subsume.then_some(NOT_SUBSUMED),
+                truth: schema_math.truth_tracking.then_some(ASSERTED),
             },
         );
         extended_row[schema_math.ret_val_col()] = res;
@@ -702,6 +703,7 @@ impl EGraph {
                     timestamp: self.next_ts().to_value(),
                     proof: term_id,
                     subsume: schema_math.subsume.then_some(NOT_SUBSUMED),
+                    truth: schema_math.truth_tracking.then_some(ASSERTED),
                     ret_val: None, // already filled in.
                 },
             );
@@ -1451,6 +1453,14 @@ impl MergeFn {
                 proof = Some(cmp::min(old_term, new_term));
                 changed |= new_term < old_term;
             }
+            let truth = schema_math.truth_tracking.then(|| {
+                let cur = cur[schema_math.truth_col()];
+                let new = new[schema_math.truth_col()];
+                // For merge, take the max (prefer ASSERTED over REFERENCED)
+                let out = cmp::max(cur, new);
+                changed |= cur != out;
+                out
+            });
 
             if changed {
                 out.extend_from_slice(new);
@@ -1460,6 +1470,7 @@ impl MergeFn {
                         timestamp,
                         proof,
                         subsume,
+                        truth,
                         ret_val: Some(ret_val),
                     },
                 );
@@ -1684,6 +1695,10 @@ impl TableAction {
                             .table_math
                             .subsume
                             .then_some(MergeVal::Constant(NOT_SUBSUMED)),
+                        truth: self
+                            .table_math
+                            .truth_tracking
+                            .then_some(MergeVal::Constant(ASSERTED)),
                         ret_val: Some(default),
                     },
                 );
@@ -1710,6 +1725,7 @@ impl TableAction {
                 timestamp: ts,
                 proof: None,
                 subsume: self.table_math.subsume.then_some(NOT_SUBSUMED),
+                truth: self.table_math.truth_tracking.then_some(ASSERTED),
                 ret_val: None,
             },
         );
@@ -1731,12 +1747,22 @@ impl TableAction {
             .lookup(state, &self.scratch)
             .expect("subsume lookup failed");
 
+        // Preserve the existing truth value when subsuming
+        let truth = self.table_math.truth_tracking.then(|| {
+            state
+                .get_table(self.table)
+                .get_row(&self.scratch)
+                .map(|row| row.vals[self.table_math.truth_col()])
+                .unwrap_or(ASSERTED) // Default to ASSERTED if not found (shouldn't happen)
+        });
+
         self.table_math.write_table_row(
             &mut self.scratch,
             RowVals {
                 timestamp: ts,
                 proof: None,
                 subsume: Some(SUBSUMED),
+                truth,
                 ret_val: Some(ret_val),
             },
         );
@@ -2053,6 +2079,8 @@ struct RowVals<T> {
     proof: Option<T>,
     /// The subsumption tag for the row. Only relevant if the table has subsumption enabled.
     subsume: Option<T>,
+    /// The truth status for the row. Only relevant if fact tracking is enabled.
+    truth: Option<T>,
     /// The return value of the row. Return values are mandatory but callers may have already
     /// filled it in.
     ret_val: Option<T>,
@@ -2073,6 +2101,7 @@ impl SchemaMath {
             timestamp,
             proof,
             subsume,
+            truth,
             ret_val,
         }: RowVals<T>,
     ) {
@@ -2097,6 +2126,14 @@ impl SchemaMath {
                 "subsume flag must be provided if subsumption is enabled"
             );
         }
+        if let Some(truth) = truth {
+            row[self.truth_col()] = truth;
+        } else {
+            assert!(
+                !self.truth_tracking,
+                "truth status must be provided if fact tracking is enabled"
+            );
+        }
     }
 
     fn num_keys(&self) -> usize {
@@ -2104,7 +2141,10 @@ impl SchemaMath {
     }
 
     fn table_columns(&self) -> usize {
-        self.func_cols + 1 /* timestamp */ + if self.tracing { 1 } else { 0 } + if self.subsume { 1 } else { 0 }
+        self.func_cols + 1 /* timestamp */ 
+            + if self.tracing { 1 } else { 0 } 
+            + if self.subsume { 1 } else { 0 }
+            + if self.truth_tracking { 1 } else { 0 }
     }
 
     #[track_caller]
@@ -2131,15 +2171,9 @@ impl SchemaMath {
         }
     }
 
-    /// Get the column index for truth status (asserted vs referenced facts).
-    /// Note: This is currently unused but provides the foundation for truth tracking.
-    #[allow(dead_code)]
     #[track_caller]
-    fn truth_col(&self, truth_enabled: bool) -> usize {
-        assert!(
-            truth_enabled,
-            "truth tracking must be enabled to use truth_col()"
-        );
+    fn truth_col(&self) -> usize {
+        assert!(self.truth_tracking, "truth tracking must be enabled to use truth_col()");
         let mut offset = self.func_cols + 1; // timestamp
         if self.tracing {
             offset += 1; // proof_id
@@ -2148,16 +2182,6 @@ impl SchemaMath {
             offset += 1; // subsume
         }
         offset
-    }
-
-    /// Calculate total columns including optional truth column.
-    /// Note: This is currently unused but provides the foundation for truth tracking.
-    #[allow(dead_code)]
-    fn table_columns_with_truth(&self, truth_enabled: bool) -> usize {
-        self.func_cols + 1 /* timestamp */ 
-            + if self.tracing { 1 } else { 0 }
-            + if self.subsume { 1 } else { 0 }
-            + if truth_enabled { 1 } else { 0 }
     }
 }
 

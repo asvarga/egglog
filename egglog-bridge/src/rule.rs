@@ -19,7 +19,7 @@ use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::syntax::SourceSyntax;
-use crate::{CachedPlanInfo, NOT_SUBSUMED, RowVals, SUBSUMED, SchemaMath};
+use crate::{ASSERTED, CachedPlanInfo, NOT_SUBSUMED, RowVals, SUBSUMED, SchemaMath};
 use crate::{
     ColumnTy, DefaultVal, EGraph, FunctionId, Result, RuleId, RuleInfo, Timestamp,
     proof_spec::{ProofBuilder, RebuildVars},
@@ -417,6 +417,11 @@ impl RuleBuilder<'_> {
                 } else {
                     None
                 },
+                truth: if schema_math.truth_tracking {
+                    Some(self.new_var(ColumnTy::Id).into())
+                } else {
+                    None
+                },
                 ret_val: None,
             },
         );
@@ -583,12 +588,22 @@ impl RuleBuilder<'_> {
             } else {
                 None
             };
+            let cur_truth_val = if schema_math.truth_tracking {
+                Some(DstVar::from(rb.lookup(
+                    table,
+                    &dst_entries,
+                    ColumnId::from_usize(schema_math.truth_col()),
+                )?))
+            } else {
+                None
+            };
             schema_math.write_table_row(
                 &mut dst_entries,
                 RowVals {
                     timestamp: inner.next_ts(),
                     proof: cur_proof_val,
                     subsume: Some(SUBSUMED.into()),
+                    truth: cur_truth_val,
                     ret_val: Some(inner.convert(&ret)),
                 },
             );
@@ -881,6 +896,7 @@ impl RuleBuilder<'_> {
                     timestamp: inner.next_ts(),
                     proof: Some(inner.mapping[term_var_id]),
                     subsume: subsume_var.clone().map(|v| inner.mapping[v.id]),
+                    truth: schema_math.truth_tracking.then_some(ASSERTED.into()),
                     ret_val: None, // already filled in,
                 },
             );
@@ -948,6 +964,7 @@ impl RuleBuilder<'_> {
                             timestamp: inner.next_ts(),
                             proof: Some(proof_var.into()),
                             subsume: Some(inner.convert(&subsume_entry)),
+                            truth: schema_math.truth_tracking.then_some(ASSERTED.into()),
                             ret_val: Some(inner.convert(&res_entry)),
                         },
                     );
@@ -963,6 +980,7 @@ impl RuleBuilder<'_> {
                         timestamp: inner.next_ts(),
                         proof: None, // tracing is off
                         subsume: schema_math.subsume.then(|| inner.convert(&subsume_entry)),
+                        truth: schema_math.truth_tracking.then_some(ASSERTED.into()),
                         ret_val: None, // already filled in
                     },
                 );
