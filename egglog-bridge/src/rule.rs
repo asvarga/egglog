@@ -125,7 +125,7 @@ pub(crate) struct Query {
     vars: DenseIdMap<VariableId, VarInfo>,
     /// The current proofs that are in scope.
     atom_proofs: Vec<Variable>,
-    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath)>,
+    atoms: Vec<(TableId, Vec<QueryEntry>, SchemaMath, bool)>,
     /// An optional callback to wire up proof-related metadata before running the RHS of a rule.
     build_reason: Option<BuildRuleCallback>,
     /// The builders for queries in this module essentially wrap the lower-level
@@ -384,6 +384,7 @@ impl RuleBuilder<'_> {
         table: TableId,
         func: Option<FunctionId>,
         subsume_entry: Option<QueryEntry>,
+        require_asserted: bool,
         entries: &[QueryEntry],
     ) -> AtomId {
         let mut atom = entries.to_vec();
@@ -440,7 +441,9 @@ impl RuleBuilder<'_> {
             }
             self.query.atom_proofs.push(proof_var);
         }
-        self.query.atoms.push((table, atom, schema_math));
+        self.query
+            .atoms
+            .push((table, atom, schema_math, require_asserted));
         res
     }
 
@@ -491,17 +494,9 @@ impl RuleBuilder<'_> {
                     .with_context(|| format!("query_table: mismatch between {entry:?} and {ty:?}"))
             })?;
 
-        // TODO: Implement truth status filtering
-        // The truth_tracking field is now in SchemaMath, which is extracted from
-        // FunctionInfo.fact_tracking. This enables generating constraints based on
-        // truth status during query planning.
-        // The require_asserted parameter is kept for API consistency but is redundant
-        // with schema_math.truth_tracking (which comes from the function's fact_tracking flag).
-        // Full implementation requires either:
-        // A) Adding truth status as a column (like subsumption) and filtering via constraint
-        // B) Modifying scan methods to call should_include_row() during iteration
-        // See TRUTH_STATUS_FILTERING_SOLUTION.md for details.
-        let _ = require_asserted; // Acknowledged - info now in schema_math.truth_tracking
+        // When require_asserted is Some(true) and truth_tracking is enabled,
+        // a constraint will be generated in build_cached_plan to filter for ASSERTED facts.
+        let require_asserted_flag = require_asserted.unwrap_or(false);
 
         Ok(self.add_atom_with_timestamp_and_func(
             info.table,
@@ -513,6 +508,7 @@ impl RuleBuilder<'_> {
                 },
                 ty: ColumnTy::Id,
             }),
+            require_asserted_flag,
             entries,
         ))
     }
@@ -1063,8 +1059,22 @@ impl Query {
         let mut rsb = RuleSetBuilder::new(db);
         let (mut qb, mut inner) = self.query_state(&mut rsb);
         let mut atom_mapping = Vec::with_capacity(self.atoms.len());
-        for (table, entries, _schema_info) in &self.atoms {
-            atom_mapping.push(add_atom(&mut qb, *table, entries, &[], &mut inner)?);
+        for (table, entries, schema_info, require_asserted) in &self.atoms {
+            let mut constraints = Vec::new();
+            // Add truth status constraint if require_asserted is true and truth tracking is enabled
+            if *require_asserted && schema_info.truth_tracking {
+                constraints.push(Constraint::EqConst {
+                    col: ColumnId::from_usize(schema_info.truth_col()),
+                    val: ASSERTED,
+                });
+            }
+            atom_mapping.push(add_atom(
+                &mut qb,
+                *table,
+                entries,
+                &constraints,
+                &mut inner,
+            )?);
         }
         let rule_id = self.run_rules_and_build(qb, inner, desc)?;
         let rs = rsb.build();
@@ -1092,7 +1102,7 @@ impl Query {
         }
         if let Some(focus_atom) = self.sole_focus {
             // There is a single "focus" atom that we will constrain to look at new values.
-            let (_, _, schema_info) = &self.atoms[focus_atom];
+            let (_, _, schema_info, _) = &self.atoms[focus_atom];
             let ts_col = ColumnId::from_usize(schema_info.ts_col());
             rsb.add_rule_from_cached_plan(
                 &cached_plan.plan,
@@ -1110,7 +1120,7 @@ impl Query {
         let mut constraints: Vec<(core_relations::AtomId, Constraint)> =
             Vec::with_capacity(self.atoms.len());
         'outer: for focus_atom in 0..self.atoms.len() {
-            for (i, (_, _, schema_info)) in self.atoms.iter().enumerate() {
+            for (i, (_, _, schema_info, _)) in self.atoms.iter().enumerate() {
                 let ts_col = ColumnId::from_usize(schema_info.ts_col());
                 match i.cmp(&focus_atom) {
                     Ordering::Less => {
