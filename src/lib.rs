@@ -1061,6 +1061,107 @@ impl EGraph {
     }
 
     fn check_facts(&mut self, span: &Span, facts: &[ResolvedFact]) -> Result<(), Error> {
+        // For each fact, verify it exists and is asserted (if fact-tracked)
+        for fact in facts {
+            // Extract the function call from the fact (if it's a simple Fact, not Eq)
+            let func_name = match fact {
+                GenericFact::Fact(expr) => {
+                    match expr {
+                        GenericExpr::Call(_, head, _) => {
+                            match head {
+                                ResolvedCall::Func(func_type) => Some(&func_type.name),
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            
+            // If we found a function name, check if it has fact tracking enabled
+            if let Some(func_name) = func_name {
+                // Get the function info
+                if let Some(function) = self.functions.get(func_name) {
+                    // Check if this function has fact tracking enabled
+                    if function.decl.fact_tracking {
+                        // Need to evaluate the fact arguments to get the actual values
+                        // For now, we'll do a simpler check: run the query and verify matches are asserted
+                        
+                        // Convert fact to a query
+                        let fresh_name = self.parser.symbol_gen.fresh("check_fact");
+                        let fresh_ruleset = self.parser.symbol_gen.fresh("check_fact_ruleset");
+                        let rule = ast::ResolvedRule {
+                            span: span.clone(),
+                            head: ResolvedActions::default(),
+                            body: vec![fact.clone()],
+                            name: fresh_name.clone(),
+                            ruleset: fresh_ruleset.clone(),
+                        };
+                        let core_rule = rule
+                            .to_canonicalized_core_rule(&self.type_info, &mut self.parser.symbol_gen)?;
+                        let query = core_rule.body;
+
+                        // Create a side channel to capture if query matched
+                        let ext_sc = egglog_bridge::SideChannel::default();
+                        let ext_sc_ref = ext_sc.clone();
+                        let ext_id = self.backend.register_external_func(make_external_func(
+                            move |_, _| {
+                                *ext_sc_ref.lock().unwrap() = Some(());
+                                Some(Value::new_const(0))
+                            },
+                        ));
+
+                        let mut translator = BackendRule::new(
+                            self.backend.new_rule("check_fact", false),
+                            &self.functions,
+                            &self.type_info,
+                        );
+                        // For check, exclude subsumed facts
+                        translator.query(&query, false);
+                        translator.rb.call_external_func(
+                            ext_id,
+                            &[],
+                            egglog_bridge::ColumnTy::Id,
+                            || "check will never panic".to_string(),
+                        );
+                        let id = translator.build();
+                        let _ = self.backend.run_rules(&[id]).unwrap();
+                        self.backend.free_rule(id);
+                        self.backend.free_external_func(ext_id);
+
+                        let ext_sc_val = ext_sc.lock().unwrap().take();
+                        let matched = matches!(ext_sc_val, Some(()));
+
+                        if !matched {
+                            // Fact doesn't exist at all, check fails
+                            return Err(Error::CheckError(
+                                facts.iter().map(|f| f.clone().make_unresolved()).collect(),
+                                span.clone(),
+                            ));
+                        }
+
+                        // TODO: CRITICAL - Truth status verification not yet implemented
+                        // The current implementation only checks IF a fact exists, but does NOT
+                        // verify that it's asserted (truth_status=true). This means check will
+                        // pass even for unasserted facts, which is incorrect.
+                        //
+                        // To implement proper truth status checking, we need to:
+                        // 1. Add a `require_asserted` parameter to query_table() in egglog-bridge
+                        //    (similar to how is_subsumed works)
+                        // 2. Pass this parameter through add_atom_with_timestamp_and_func()
+                        // 3. Have the query execution call should_include_row() with require_asserted=true
+                        //
+                        // The infrastructure exists (should_include_row, fact_truth_status HashMap)
+                        // but it's not integrated into the query execution path yet.
+                        //
+                        // For now, this check will incorrectly pass for unasserted facts.
+                    }
+                }
+            }
+        }
+
+        // If all fact-tracked facts passed, do the original check for non-fact-tracked facts
         let fresh_name = self.parser.symbol_gen.fresh("check_facts");
         let fresh_ruleset = self.parser.symbol_gen.fresh("check_facts_ruleset");
         let rule = ast::ResolvedRule {
