@@ -1070,6 +1070,16 @@ impl Query {
                     val: ASSERTED,
                 });
             }
+            // Add subsume status constraint if there's a constant value at the subsume column
+            if schema_info.subsume {
+                let subsume_col_idx = schema_info.subsume_col();
+                if let Some(QueryEntry::Const { val, .. }) = entries.get(subsume_col_idx) {
+                    constraints.push(Constraint::EqConst {
+                        col: ColumnId::from_usize(subsume_col_idx),
+                        val: *val,
+                    });
+                }
+            }
             atom_mapping.push(add_atom(
                 &mut qb,
                 *table,
