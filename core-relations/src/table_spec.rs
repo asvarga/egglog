@@ -398,7 +398,11 @@ pub trait Table: Any + Send + Sync {
     /// but marks it as unasserted.
     ///
     /// Returns None if fact tracking is not enabled for this table.
-    fn create_or_lookup_unasserted_fact(&mut self, _key: &[Value]) -> Option<FactId> {
+    fn create_or_lookup_unasserted_fact(
+        &mut self,
+        _key: &[Value],
+        _ret_val: Value,
+    ) -> Option<FactId> {
         None // Default implementation: no fact tracking
     }
 

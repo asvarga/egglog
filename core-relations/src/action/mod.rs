@@ -456,7 +456,7 @@ impl<'a> ExecutionState<'a> {
     ///
     /// Returns None if fact tracking is not enabled on the table.
     #[allow(invalid_reference_casting)] // See safety comment above
-    pub fn create_unasserted_fact_ref(&mut self, table: TableId, key: &[Value]) -> Option<FactRef> {
+    pub fn create_unasserted_fact_ref(&mut self, table: TableId, key: &[Value], ret_val: Value) -> Option<FactRef> {
         // SAFETY: See method documentation above. ExecutionState has exclusive database access.
         unsafe {
             let table_info = &self.db.table_info[table];
@@ -465,7 +465,7 @@ impl<'a> ExecutionState<'a> {
             
             let table_dyn: &mut dyn crate::Table = &mut **wrapped_table_mut;
             
-            table_dyn.create_or_lookup_unasserted_fact(key)
+            table_dyn.create_or_lookup_unasserted_fact(key, ret_val)
                 .map(|fact_id| FactRef { table_id: table, fact_id })
         }
     }

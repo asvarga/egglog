@@ -636,8 +636,12 @@ impl Table for SortedWritesTable {
         self.truth_enabled = true;
     }
 
-    fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
-        self.create_or_lookup_unasserted_fact(key)
+    fn create_or_lookup_unasserted_fact(
+        &mut self,
+        key: &[Value],
+        ret_val: Value,
+    ) -> Option<FactId> {
+        self.create_or_lookup_unasserted_fact(key, ret_val)
     }
 
     fn should_include_row(&self, row_id: RowId, require_asserted: bool) -> bool {
@@ -835,6 +839,7 @@ impl SortedWritesTable {
     }
 
     fn serial_insert(&mut self, exec_state: &mut ExecutionState) -> bool {
+        eprintln!("[DEBUG] serial_insert called");
         let mut changed = false;
         let n_keys = self.n_keys;
         let mut scratch = with_pool_set(|ps| ps.get::<Vec<Value>>());
@@ -842,8 +847,18 @@ impl SortedWritesTable {
         for (_outer_shard, queue) in self.pending_state.pending_rows.iter() {
             if let Some(sort_by) = self.sort_by {
                 while let Some(buf) = queue.pop() {
+                    eprintln!("[DEBUG] Processing buffer with {} rows", buf.len());
                     for query in buf.non_stale() {
                         let key = &query[0..n_keys];
+
+                        if self.truth_enabled {
+                            eprintln!(
+                                "[DEBUG SORTED] Processing query with key {:?}, query len={}",
+                                key,
+                                query.len()
+                            );
+                        }
+
                         let entry = get_entry_mut(query, n_keys, &mut self.hash, |row| {
                             let Some(row) = self.data.get_row(row) else {
                                 return false;
@@ -859,9 +874,27 @@ impl SortedWritesTable {
                                 .data
                                 .get_row(*row)
                                 .expect("table should not point to stale entry");
+
+                            if self.truth_enabled && n_keys <= cur.len() {
+                                let cur_key = &cur[0..n_keys];
+                                let new_key = &query[0..n_keys];
+                                if cur_key == new_key {
+                                    eprintln!(
+                                        "[DEBUG SORTED MERGE] Merging row with key {:?}",
+                                        cur_key
+                                    );
+                                    eprintln!(
+                                        "[DEBUG SORTED MERGE] Current truth={:?}, New truth={:?}",
+                                        cur.get(self.n_columns - 1),
+                                        query.get(self.n_columns - 1)
+                                    );
+                                }
+                            }
+
                             let merge_result = (self.merge)(exec_state, cur, query, &mut scratch);
+                            eprintln!("[DEBUG SORTED MERGE] Merge result: {}", merge_result);
                             if merge_result {
-                                let sort_val = query[sort_by.index()];
+                                let sort_val = cur[sort_by.index()]; // Use CURRENT row's sort value, not query's
                                 let new = self.data.add_row(&scratch);
                                 // Handle fact ID transfer and truth status update
                                 if self.truth_enabled {
@@ -915,7 +948,42 @@ impl SortedWritesTable {
                         } else {
                             let sort_val = query[sort_by.index()];
                             // New value: update invariants.
-                            let new = self.data.add_row(query);
+                            // If this is a pending unasserted fact, we need to fix the truth column
+                            let mut row_to_insert = query;
+                            let mut scratch_for_truth = Vec::new();
+                            if self.truth_enabled {
+                                let key = &query[0..n_keys];
+                                if let Some(ref pending) = self.pending_unasserted_facts {
+                                    if pending.contains_key(key) {
+                                        // This is an unasserted fact - set truth column to REFERENCED (0)
+                                        // Make a copy and fix the truth column
+                                        scratch_for_truth.extend_from_slice(query);
+                                        // Truth column is the last column when truth_enabled=true
+                                        eprintln!(
+                                            "[DEBUG SORTED] Setting truth column to REFERENCED for unasserted fact"
+                                        );
+                                        eprintln!(
+                                            "[DEBUG SORTED] Query len={}, n_columns={}",
+                                            query.len(),
+                                            self.n_columns
+                                        );
+                                        eprintln!(
+                                            "[DEBUG SORTED] Before: truth_col[{}] = {:?}",
+                                            self.n_columns - 1,
+                                            scratch_for_truth[self.n_columns - 1]
+                                        );
+                                        scratch_for_truth[self.n_columns - 1] = Value::new_const(0); // REFERENCED = 0
+                                        eprintln!(
+                                            "[DEBUG SORTED] After: truth_col[{}] = {:?}",
+                                            self.n_columns - 1,
+                                            scratch_for_truth[self.n_columns - 1]
+                                        );
+                                        row_to_insert = &scratch_for_truth;
+                                    }
+                                }
+                            }
+
+                            let new = self.data.add_row(row_to_insert);
                             // Assign fact ID for new row
                             if self.truth_enabled {
                                 // Check if this is a pending unasserted fact
@@ -1011,7 +1079,24 @@ impl SortedWritesTable {
                             scratch.clear();
                         } else {
                             // New value: update invariants.
-                            let new = self.data.add_row(query);
+                            // If this is a pending unasserted fact, we need to fix the truth column
+                            let mut row_to_insert = query;
+                            let mut scratch_for_truth = Vec::new();
+                            if self.truth_enabled {
+                                let key = &query[0..n_keys];
+                                if let Some(ref pending) = self.pending_unasserted_facts {
+                                    if pending.contains_key(key) {
+                                        // This is an unasserted fact - set truth column to REFERENCED (0)
+                                        // Make a copy and fix the truth column
+                                        scratch_for_truth.extend_from_slice(query);
+                                        // Truth column is the last column when truth_enabled=true
+                                        scratch_for_truth[self.n_columns - 1] = Value::new_const(0); // REFERENCED = 0
+                                        row_to_insert = &scratch_for_truth;
+                                    }
+                                }
+                            }
+
+                            let new = self.data.add_row(row_to_insert);
                             // Assign fact ID for new row (unsorted)
                             if self.truth_enabled {
                                 // Check if this is a pending unasserted fact
@@ -1300,7 +1385,11 @@ impl SortedWritesTable {
     /// This is used for first-class facts where we need to reference propositions.
     /// If the key already exists in the table, returns its FactId (assigning one if needed).
     /// If the key doesn't exist, creates a new unasserted fact (row exists but marked as false).
-    pub fn create_or_lookup_unasserted_fact(&mut self, key: &[Value]) -> Option<FactId> {
+    pub fn create_or_lookup_unasserted_fact(
+        &mut self,
+        key: &[Value],
+        ret_val: Value,
+    ) -> Option<FactId> {
         if !self.truth_enabled {
             return None;
         }
@@ -1350,8 +1439,10 @@ impl SortedWritesTable {
             // Construct the full row for queueing
             let mut full_row = Vec::with_capacity(self.n_columns);
             full_row.extend_from_slice(key);
-            // Add stale values for any non-key columns
-            for _ in self.n_keys..self.n_columns {
+            // Add the actual return value
+            full_row.push(ret_val);
+            // Add stale values for any remaining non-key columns (timestamp, truth, etc.)
+            for _ in (self.n_keys + 1)..self.n_columns {
                 full_row.push(Value::stale());
             }
 

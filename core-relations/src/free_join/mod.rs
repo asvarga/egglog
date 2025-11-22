@@ -812,11 +812,11 @@ impl Database {
     /// Unlike create_fact_ref, this creates a fact that exists but is not asserted.
     /// This is useful for modal logic where we need to reference propositions
     /// without claiming they are true.
-    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<FactRef> {
+    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value], ret_val: Value) -> Option<FactRef> {
         let table = self.get_table_mut(table_id);
         
         // Try to create or lookup the fact
-        let fact_id = table.create_or_lookup_unasserted_fact(key)?;
+        let fact_id = table.create_or_lookup_unasserted_fact(key, ret_val)?;
         
         Some(FactRef { table_id, fact_id })
     }

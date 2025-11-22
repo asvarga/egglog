@@ -404,8 +404,8 @@ impl EGraph {
     /// Unlike create_fact_ref, this creates a fact that exists but is not asserted.
     /// This is useful for modal logic where we need to reference propositions
     /// without claiming they are true.
-    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value]) -> Option<Value> {
-        self.db.create_unasserted_fact_ref(table_id, key)
+    pub fn create_unasserted_fact_ref(&mut self, table_id: TableId, key: &[Value], ret_val: Value) -> Option<Value> {
+        self.db.create_unasserted_fact_ref(table_id, key, ret_val)
             .map(|fact_ref| self.base_values().get(fact_ref))
     }
 
@@ -1440,7 +1440,9 @@ impl MergeFn {
             let ret_val = {
                 let cur = cur[schema_math.ret_val_col()];
                 let new = new[schema_math.ret_val_col()];
+                eprintln!("[DEBUG MERGE CB] cur ret_val={:?}, new ret_val={:?}", cur, new);
                 let out = resolved.run(state, cur, new, timestamp);
+                eprintln!("[DEBUG MERGE CB] resolved.run returned {:?}", out);
                 changed |= cur != out;
                 out
             };

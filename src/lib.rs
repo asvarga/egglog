@@ -408,7 +408,11 @@ impl Default for EGraph {
 
                     // Create or lookup the fact reference, creating an unasserted fact if needed
                     // This is the key change: instead of just looking up, we create if it doesn't exist
-                    if let Some(fact_ref) = exec_state.create_unasserted_fact_ref(table_id, key) {
+                    // For relations (fact-tracked functions), the return value is always Unit
+                    let unit = Value::new_const(0);
+                    if let Some(fact_ref) =
+                        exec_state.create_unasserted_fact_ref(table_id, key, unit)
+                    {
                         let base_values = exec_state.base_values();
                         return Some(base_values.get(fact_ref));
                     }
@@ -950,11 +954,19 @@ impl EGraph {
     }
 
     fn eval_actions(&mut self, actions: &ResolvedActions) -> Result<(), Error> {
+        eprintln!(
+            "[DEBUG eval_actions] Processing {} actions",
+            actions.0.len()
+        );
         let (actions, _) = actions.to_core_actions(
             &self.type_info,
             &mut Default::default(),
             &mut self.parser.symbol_gen,
         )?;
+        eprintln!(
+            "[DEBUG eval_actions] Converted to {} core actions",
+            actions.0.len()
+        );
 
         let mut translator = BackendRule::new(
             self.backend.new_rule("eval_actions", false),
@@ -1078,10 +1090,15 @@ impl EGraph {
 
             // If we found a function name, check if it has fact tracking enabled
             if let Some(func_name) = func_name {
+                eprintln!(
+                    "[DEBUG CHECK] Checking fact-tracked function: {}",
+                    func_name
+                );
                 // Get the function info
                 if let Some(function) = self.functions.get(func_name) {
                     // Check if this function has fact tracking enabled
                     if function.decl.fact_tracking {
+                        eprintln!("[DEBUG CHECK] Function has fact tracking enabled");
                         // Need to evaluate the fact arguments to get the actual values
                         // For now, we'll do a simpler check: run the query and verify matches are asserted
 
@@ -1904,6 +1921,17 @@ impl<'a> BackendRule<'a> {
 
     fn actions(&mut self, actions: &core::ResolvedCoreActions) -> Result<(), Error> {
         for action in &actions.0 {
+            eprintln!(
+                "[DEBUG actions] Action type: {}",
+                match action {
+                    core::GenericCoreAction::Let(..) => "Let",
+                    core::GenericCoreAction::LetAtomTerm(..) => "LetAtomTerm",
+                    core::GenericCoreAction::Set(..) => "Set",
+                    core::GenericCoreAction::Change(..) => "Change",
+                    core::GenericCoreAction::Union(..) => "Union",
+                    core::GenericCoreAction::Panic(..) => "Panic",
+                }
+            );
             match action {
                 core::GenericCoreAction::Let(span, v, f, args) => {
                     let v = core::GenericAtomTerm::Var(span.clone(), v.clone());
@@ -1936,6 +1964,7 @@ impl<'a> BackendRule<'a> {
                 core::GenericCoreAction::Set(_, f, xs, y) => match f {
                     ResolvedCall::Primitive(..) => panic!("runtime primitive set!"),
                     ResolvedCall::Func(f) => {
+                        eprintln!("[DEBUG ACTION] Set action for function: {}", f.name);
                         let f = self.func(f);
                         let args = self.args(xs.iter().chain([y]));
                         self.rb.set(f, &args)
